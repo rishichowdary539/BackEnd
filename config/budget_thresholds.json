@@ -1,0 +1,12 @@
+{
+  "Food": 400,
+  "Travel": 250,
+  "Rent": 1200,
+  "Shopping": 300,
+  "Utilities": 180,
+  "Health": 150,
+  "Entertainment": 150,
+  "Education": 200,
+  "Misc": 100
+}
+
