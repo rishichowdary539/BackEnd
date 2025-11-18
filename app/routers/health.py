@@ -122,7 +122,9 @@ async def aws_services_status():
         lambda_status["connected"] = True
         lambda_status["status"] = response["Configuration"]["State"]
         lambda_status["runtime"] = response["Configuration"]["Runtime"]
-        lambda_status["last_modified"] = response["Configuration"]["LastModified"].isoformat()
+        # LastModified is already a string from AWS API
+        last_modified = response["Configuration"]["LastModified"]
+        lambda_status["last_modified"] = last_modified.isoformat() if hasattr(last_modified, 'isoformat') else str(last_modified)
         lambda_status["region"] = settings.DYNAMO_REGION
     except ClientError as e:
         error_code = e.response.get('Error', {}).get('Code', 'Unknown')
