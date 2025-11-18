@@ -30,7 +30,11 @@ app = FastAPI(
 # CORS configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Update to specific frontend URL in production
+    allow_origins=[
+        "http://smart-expense-tracker-app.s3-website-eu-west-1.amazonaws.com",
+        "http://localhost:3000",
+        "http://localhost:8000",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
