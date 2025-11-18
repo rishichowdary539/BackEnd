@@ -1,0 +1,298 @@
+{
+	"info": {
+		"_postman_id": "expense-tracker-api",
+		"name": "Smart Expense Tracker API",
+		"description": "Complete API collection for Smart Expense Tracker",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "Health",
+			"item": [
+				{
+					"name": "Health Check",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/health",
+							"host": ["{{base_url}}"],
+							"path": ["api", "health"]
+						},
+						"description": "Check API health status"
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Auth",
+			"item": [
+				{
+					"name": "Register",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"email\": \"user@example.com\",\n    \"password\": \"password123\",\n    \"full_name\": \"John Doe\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/auth/register",
+							"host": ["{{base_url}}"],
+							"path": ["api", "auth", "register"]
+						},
+						"description": "Register a new user"
+					},
+					"response": []
+				},
+				{
+					"name": "Login",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    var jsonData = pm.response.json();",
+									"    pm.environment.set(\"access_token\", jsonData.access_token);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/x-www-form-urlencoded"
+							}
+						],
+						"body": {
+							"mode": "urlencoded",
+							"urlencoded": [
+								{
+									"key": "username",
+									"value": "user@example.com",
+									"type": "text"
+								},
+								{
+									"key": "password",
+									"value": "password123",
+									"type": "text"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{base_url}}/api/auth/login",
+							"host": ["{{base_url}}"],
+							"path": ["api", "auth", "login"]
+						},
+						"description": "Login and get access token. Token is automatically saved to environment variable."
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Expenses",
+			"item": [
+				{
+					"name": "Create Expense",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"category\": \"Food\",\n    \"amount\": 25.50,\n    \"description\": \"Lunch at restaurant\",\n    \"timestamp\": \"2025-11-18T12:00:00Z\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/expenses/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "expenses", ""]
+						},
+						"description": "Create a new expense. Requires authentication."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Monthly Expenses",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/expenses/monthly/2025-11",
+							"host": ["{{base_url}}"],
+							"path": ["api", "expenses", "monthly", "2025-11"]
+						},
+						"description": "Get all expenses for a specific month (YYYY-MM format). Returns expenses and summary."
+					},
+					"response": []
+				},
+				{
+					"name": "Update Expense",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"amount\": 30.00,\n    \"description\": \"Updated description\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/expenses/:expense_id",
+							"host": ["{{base_url}}"],
+							"path": ["api", "expenses", ":expense_id"],
+							"variable": [
+								{
+									"key": "expense_id",
+									"value": "your-expense-id-here"
+								}
+							]
+						},
+						"description": "Update an existing expense. Replace :expense_id with actual expense ID."
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Expense",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/expenses/:expense_id",
+							"host": ["{{base_url}}"],
+							"path": ["api", "expenses", ":expense_id"],
+							"variable": [
+								{
+									"key": "expense_id",
+									"value": "your-expense-id-here"
+								}
+							]
+						},
+						"description": "Delete an expense. Replace :expense_id with actual expense ID."
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Reports",
+			"item": [
+				{
+					"name": "Generate Monthly Report",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/reports/monthly/2025-11",
+							"host": ["{{base_url}}"],
+							"path": ["api", "reports", "monthly", "2025-11"]
+						},
+						"description": "Generate monthly expense report with PDF and CSV files uploaded to S3. Returns insights and download URLs."
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Lambda",
+			"item": [
+				{
+					"name": "Trigger Lambda",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/lambda/trigger",
+							"host": ["{{base_url}}"],
+							"path": ["api", "lambda", "trigger"]
+						},
+						"description": "Manually trigger the monthly expense reports Lambda function."
+					},
+					"response": []
+				},
+				{
+					"name": "Lambda Status",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/lambda/status",
+							"host": ["{{base_url}}"],
+							"path": ["api", "lambda", "status"]
+						},
+						"description": "Check Lambda function status and scheduler information."
+					},
+					"response": []
+				}
+			]
+		}
+	],
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "https://uunr59c9a3.execute-api.eu-west-1.amazonaws.com/prod",
+			"type": "string"
+		},
+		{
+			"key": "access_token",
+			"value": "",
+			"type": "string"
+		}
+	]
+}
+
