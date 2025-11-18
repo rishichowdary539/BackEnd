@@ -7,7 +7,7 @@ from app.core.config import settings
 from app.core.security import decode_access_token
 from app.db import dynamo
 from app.models.expense import ExpenseCreate, ExpenseInDB, ExpensePublic, ExpenseUpdate
-from finance_analyzer_lib import FinanceAnalyzer
+from app.utils.analyzer import FinanceAnalyzer
 
 router = APIRouter()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")

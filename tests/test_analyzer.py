@@ -1,4 +1,4 @@
-from finance_analyzer_lib import FinanceAnalyzer
+from app.utils.analyzer import FinanceAnalyzer
 
 sample_expenses = [
     {"category": "Food", "amount": 250.0, "timestamp": "2025-11-01T12:00:00Z"},
