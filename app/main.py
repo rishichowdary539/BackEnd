@@ -32,12 +32,15 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://smart-expense-tracker-app.s3-website-eu-west-1.amazonaws.com",
+        "https://smart-expense-tracker-app.s3-website-eu-west-1.amazonaws.com",
         "http://localhost:3000",
         "http://localhost:8000",
     ],
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
+    expose_headers=["*"],
+    max_age=3600,
 )
 
 # Root endpoint
