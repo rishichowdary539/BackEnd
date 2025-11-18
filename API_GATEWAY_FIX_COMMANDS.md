@@ -22,11 +22,13 @@ $EC2_PORT = "8000"
 
 **For Bash/Linux/Mac:**
 ```bash
-export REGION="eu-west-1"
-export API_NAME="smart-expense-monthly-reports-api"
-export EC2_IP="34.248.251.253"
-export EC2_PORT="8000"
+REGION="eu-west-1"
+API_NAME="smart-expense-monthly-reports-api"
+EC2_IP="34.248.251.253"
+EC2_PORT="8000"
 ```
+
+**Note:** In bash, don't use `$` when setting variables, only when using them!
 
 ---
 
@@ -104,7 +106,57 @@ aws apigateway put-integration \
 
 ---
 
-### Step 4: Update Integration Response
+### Step 4: Update Method Response (Must be done BEFORE integration response!)
+
+**If you get "Response already exists" error, use update-method-response instead:**
+
+**PowerShell:**
+```powershell
+# Try put first (creates new)
+aws apigateway put-method-response `
+  --rest-api-id $API_ID `
+  --resource-id $PROXY_RESOURCE_ID `
+  --http-method ANY `
+  --status-code 200 `
+  --region $REGION `
+  --response-parameters '{\"method.response.header.Access-Control-Allow-Origin\": true}'
+
+# If above fails with "already exists", use patch to update:
+aws apigateway update-method-response `
+  --rest-api-id $API_ID `
+  --resource-id $PROXY_RESOURCE_ID `
+  --http-method ANY `
+  --status-code 200 `
+  --region $REGION `
+  --patch-ops '[{\"op\":\"add\",\"path\":\"/responseParameters/method.response.header.Access-Control-Allow-Origin\",\"value\":\"true\"}]'
+```
+
+**Bash:**
+```bash
+# Try put first (creates new)
+aws apigateway put-method-response \
+  --rest-api-id $API_ID \
+  --resource-id $PROXY_RESOURCE_ID \
+  --http-method ANY \
+  --status-code 200 \
+  --region $REGION \
+  --response-parameters '{"method.response.header.Access-Control-Allow-Origin": true}'
+
+# If above fails with "already exists", use patch to update:
+aws apigateway update-method-response \
+  --rest-api-id $API_ID \
+  --resource-id $PROXY_RESOURCE_ID \
+  --http-method ANY \
+  --status-code 200 \
+  --region $REGION \
+  --patch-ops '[{"op":"add","path":"/responseParameters/method.response.header.Access-Control-Allow-Origin","value":"true"}]'
+```
+
+**Expected output:** JSON response with method response details
+
+---
+
+### Step 5: Update Integration Response
 
 **PowerShell:**
 ```powershell
@@ -132,33 +184,7 @@ aws apigateway put-integration-response \
 
 **Expected output:** JSON response with integration response details
 
----
-
-### Step 5: Update Method Response
-
-**PowerShell:**
-```powershell
-aws apigateway put-method-response `
-  --rest-api-id $API_ID `
-  --resource-id $PROXY_RESOURCE_ID `
-  --http-method ANY `
-  --status-code 200 `
-  --region $REGION `
-  --response-parameters '{\"method.response.header.Access-Control-Allow-Origin\": true}'
-```
-
-**Bash:**
-```bash
-aws apigateway put-method-response \
-  --rest-api-id $API_ID \
-  --resource-id $PROXY_RESOURCE_ID \
-  --http-method ANY \
-  --status-code 200 \
-  --region $REGION \
-  --response-parameters '{"method.response.header.Access-Control-Allow-Origin": true}'
-```
-
-**Expected output:** JSON response with method response details
+**Note:** Method response must be defined first (Step 4) before integration response (Step 5)!
 
 ---
 
