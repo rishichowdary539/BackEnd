@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 import logging
 
 from app.core.config import settings
-from app.routers import auth, expenses, reports, lambda_trigger, health
+from app.routers import auth, expenses, reports, lambda_trigger, health, example
 from app.utils.scheduler import start_scheduler, stop_scheduler
 
 logger = logging.getLogger(__name__)
@@ -48,3 +48,4 @@ app.include_router(auth.router, prefix=f"{settings.API_PREFIX}/auth", tags=["Aut
 app.include_router(expenses.router, prefix=f"{settings.API_PREFIX}/expenses", tags=["Expenses"])
 app.include_router(reports.router, prefix=f"{settings.API_PREFIX}/reports", tags=["Reports"])
 app.include_router(lambda_trigger.router, prefix=f"{settings.API_PREFIX}/lambda", tags=["Lambda"])
+app.include_router(example.router, prefix=f"{settings.API_PREFIX}/example", tags=["Example"])  # /api/example - for testing, will be removed
