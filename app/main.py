@@ -43,7 +43,7 @@ def root():
 
 
 # Register routers
-app.include_router(health.router, tags=["Health"])  # No prefix - available at root level
+app.include_router(health.router, prefix=f"{settings.API_PREFIX}", tags=["Health"])  # /api/health
 app.include_router(auth.router, prefix=f"{settings.API_PREFIX}/auth", tags=["Auth"])
 app.include_router(expenses.router, prefix=f"{settings.API_PREFIX}/expenses", tags=["Expenses"])
 app.include_router(reports.router, prefix=f"{settings.API_PREFIX}/reports", tags=["Reports"])
