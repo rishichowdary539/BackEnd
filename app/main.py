@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 import logging
 
 from app.core.config import settings
-from app.routers import auth, expenses, reports, lambda_trigger
+from app.routers import auth, expenses, reports, lambda_trigger, health
 from app.utils.scheduler import start_scheduler, stop_scheduler
 
 logger = logging.getLogger(__name__)
@@ -43,6 +43,7 @@ def root():
 
 
 # Register routers
+app.include_router(health.router, tags=["Health"])  # No prefix - available at root level
 app.include_router(auth.router, prefix=f"{settings.API_PREFIX}/auth", tags=["Auth"])
 app.include_router(expenses.router, prefix=f"{settings.API_PREFIX}/expenses", tags=["Expenses"])
 app.include_router(reports.router, prefix=f"{settings.API_PREFIX}/reports", tags=["Reports"])
