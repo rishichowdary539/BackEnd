@@ -33,6 +33,7 @@ app.add_middleware(
     allow_origins=[
         "http://smart-expense-tracker-app.s3-website-eu-west-1.amazonaws.com",
         "https://smart-expense-tracker-app.s3-website-eu-west-1.amazonaws.com",
+        "https://6ublq85ap1.execute-api.eu-west-1.amazonaws.com",
         "http://localhost:3000",
         "http://localhost:8000",
     ],
