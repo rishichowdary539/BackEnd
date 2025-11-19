@@ -1,5 +1,6 @@
 from decimal import Decimal
-from typing import Any
+from typing import Any, Optional
+from datetime import datetime
 
 import boto3
 from botocore.exceptions import ClientError
@@ -24,6 +25,17 @@ def get_user_by_email(email: str):
         return _from_dynamo(response["Items"][0]) if response["Items"] else None
     except ClientError as e:
         print(f"[ERROR] get_user_by_email failed: {e.response['Error']['Message']}")
+        return None
+
+
+def get_user_by_id(user_id: str):
+    """Get user by user_id from the Users table."""
+    try:
+        response = users_table.get_item(Key={"user_id": user_id})
+        item = response.get("Item")
+        return _from_dynamo(item) if item else None
+    except ClientError as e:
+        print(f"[ERROR] get_user_by_id failed: {e.response['Error']['Message']}")
         return None
 
 
@@ -148,3 +160,163 @@ def _from_dynamo(obj: Any):
             return int(obj)
         return float(obj)
     return obj
+
+
+# Scheduler Settings Storage (using SYSTEM_CONFIG user_id)
+SYSTEM_CONFIG_USER_ID = "SYSTEM_CONFIG"
+
+
+def get_scheduler_settings():
+    """
+    Get scheduler settings from DynamoDB (stored in a special system user record).
+    Returns dict with day, hour, minute, running, or None if not found.
+    """
+    try:
+        response = users_table.get_item(Key={"user_id": SYSTEM_CONFIG_USER_ID})
+        item = response.get("Item")
+        if item:
+            settings = _from_dynamo(item)
+            return {
+                "day": settings.get("scheduler_day", 1),
+                "hour": settings.get("scheduler_hour", 6),
+                "minute": settings.get("scheduler_minute", 0),
+                "running": settings.get("scheduler_running", False),
+            }
+        return None
+    except ClientError as e:
+        print(f"[ERROR] get_scheduler_settings failed: {e.response['Error']['Message']}")
+        return None
+
+
+def save_scheduler_settings(day: int, hour: int, minute: int, running: Optional[bool] = None):
+    """
+    Save scheduler settings to DynamoDB (stored in a special system user record).
+    Preserves budget thresholds when updating scheduler settings.
+    """
+    try:
+        # Get existing settings to preserve running state if not provided
+        existing = get_scheduler_settings()
+        if existing is None:
+            existing = {}
+        
+        # Get existing thresholds to preserve them
+        existing_thresholds = get_budget_thresholds()
+        
+        item = {
+            "user_id": SYSTEM_CONFIG_USER_ID,
+            "email": "system@config.local",  # Dummy email for system record
+            "scheduler_day": day,
+            "scheduler_hour": hour,
+            "scheduler_minute": minute,
+            "scheduler_running": running if running is not None else existing.get("running", False),
+            "updated_at": datetime.utcnow().isoformat(),
+        }
+        
+        # Preserve budget thresholds if they exist
+        if existing_thresholds:
+            item["budget_thresholds"] = existing_thresholds
+        
+        users_table.put_item(Item=_convert_for_dynamo(item))
+        return True
+    except ClientError as e:
+        print(f"[ERROR] save_scheduler_settings failed: {e.response['Error']['Message']}")
+        return False
+
+
+def initialize_default_scheduler_settings():
+    """
+    Initialize default scheduler settings in DynamoDB if they don't exist.
+    Default: 1st day of month, 6 AM UTC (any time can be set later).
+    """
+    existing = get_scheduler_settings()
+    if existing is None:
+        # No settings exist, create default
+        save_scheduler_settings(day=1, hour=6, minute=0, running=False)
+        return True
+    return False
+
+
+def get_budget_thresholds():
+    """
+    Get budget thresholds from DynamoDB (stored in a special system user record).
+    Returns dict with category thresholds, or None if not found.
+    """
+    try:
+        response = users_table.get_item(Key={"user_id": SYSTEM_CONFIG_USER_ID})
+        item = response.get("Item")
+        if item:
+            settings = _from_dynamo(item)
+            thresholds = settings.get("budget_thresholds")
+            if thresholds:
+                return thresholds
+        return None
+    except ClientError as e:
+        print(f"[ERROR] get_budget_thresholds failed: {e.response['Error']['Message']}")
+        return None
+
+
+def save_budget_thresholds(thresholds: dict):
+    """
+    Save budget thresholds to DynamoDB (stored in a special system user record).
+    thresholds: dict with category names as keys and amounts as values.
+    """
+    try:
+        # Get existing settings to preserve scheduler settings
+        existing_settings = get_scheduler_settings()
+        existing_thresholds = get_budget_thresholds()
+        
+        item = {
+            "user_id": SYSTEM_CONFIG_USER_ID,
+            "email": "system@config.local",
+            "budget_thresholds": thresholds,
+            "updated_at": datetime.utcnow().isoformat(),
+        }
+        
+        # Preserve scheduler settings if they exist
+        if existing_settings:
+            item["scheduler_day"] = existing_settings.get("day", 1)
+            item["scheduler_hour"] = existing_settings.get("hour", 6)
+            item["scheduler_minute"] = existing_settings.get("minute", 0)
+            item["scheduler_running"] = existing_settings.get("running", False)
+        
+        users_table.put_item(Item=_convert_for_dynamo(item))
+        return True
+    except ClientError as e:
+        print(f"[ERROR] save_budget_thresholds failed: {e.response['Error']['Message']}")
+        return False
+
+
+def initialize_default_budget_thresholds():
+    """
+    Initialize default budget thresholds in DynamoDB if they don't exist.
+    Loads from config/budget_thresholds.json file.
+    """
+    existing = get_budget_thresholds()
+    if existing is None:
+        # Load from JSON file
+        import json
+        from pathlib import Path
+        from app.core.config import settings
+        
+        budget_file = Path(settings.BUDGET_THRESHOLDS_JSON)
+        if budget_file.exists():
+            with budget_file.open() as fp:
+                thresholds = json.load(fp)
+                save_budget_thresholds(thresholds)
+                return True
+        else:
+            # Use default thresholds if file doesn't exist
+            default_thresholds = {
+                "Food": 400,
+                "Travel": 250,
+                "Rent": 1200,
+                "Shopping": 300,
+                "Utilities": 180,
+                "Health": 150,
+                "Entertainment": 150,
+                "Education": 200,
+                "Misc": 100
+            }
+            save_budget_thresholds(default_thresholds)
+            return True
+    return False

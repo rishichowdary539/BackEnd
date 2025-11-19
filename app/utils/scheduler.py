@@ -38,21 +38,35 @@ def start_scheduler():
     
     scheduler = BackgroundScheduler()
     
-    # Get cron schedule from environment variable (default: 1st of month at 6 AM UTC)
-    # Format: "day hour minute" or full cron expression
-    cron_schedule = os.getenv("MONTHLY_REPORTS_CRON", "1 6 0")  # day=1, hour=6, minute=0
+    # Get cron schedule from DynamoDB (fallback to env var, then default)
+    from app.db import dynamo
     
-    # Parse schedule
-    parts = cron_schedule.split()
-    if len(parts) >= 3:
-        day = int(parts[0])
-        hour = int(parts[1])
-        minute = int(parts[2])
+    db_settings = dynamo.get_scheduler_settings()
+    if db_settings:
+        # Use settings from DynamoDB
+        day = db_settings.get("day", 1)
+        hour = db_settings.get("hour", 6)
+        minute = db_settings.get("minute", 0)
+        logger.info(f"Loaded scheduler settings from DynamoDB: day={day}, hour={hour}, minute={minute}")
     else:
-        # Default: 1st of month at 6 AM UTC
-        day = 1
-        hour = 6
-        minute = 0
+        # Fallback to environment variable
+        cron_schedule = os.getenv("MONTHLY_REPORTS_CRON", "1 6 0")  # day=1, hour=6, minute=0
+        
+        # Parse schedule
+        parts = cron_schedule.split()
+        if len(parts) >= 3:
+            day = int(parts[0])
+            hour = int(parts[1])
+            minute = int(parts[2])
+        else:
+            # Default: 1st of month at 6 AM UTC
+            day = 1
+            hour = 6
+            minute = 0
+        
+        # Save default settings to DynamoDB for future use (not running by default)
+        dynamo.save_scheduler_settings(day, hour, minute, running=False)
+        logger.info(f"Using environment/default settings and saving to DynamoDB: day={day}, hour={hour}, minute={minute}")
     
     # Add monthly job
     scheduler.add_job(

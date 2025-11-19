@@ -39,10 +39,22 @@ class FinanceAnalyzer:
     ) -> None:
         self._spike_sigma = spike_sigma
         self._minimum_spike_amount = minimum_spike_amount
-        self._budget_thresholds = self._load_budget_thresholds(budget_config_path)
+        self._budget_config_path = budget_config_path
+        # Load thresholds from DB first, fallback to file
+        self._budget_thresholds = self._load_budget_thresholds_from_db() or self._load_budget_thresholds(budget_config_path)
+
+    @staticmethod
+    def _load_budget_thresholds_from_db() -> Optional[Dict[str, float]]:
+        """Load budget thresholds from DynamoDB."""
+        try:
+            from app.db import dynamo
+            return dynamo.get_budget_thresholds()
+        except Exception:
+            return None
 
     @staticmethod
     def _load_budget_thresholds(path: Optional[str | Path]) -> Dict[str, float]:
+        """Load budget thresholds from JSON file (fallback)."""
         if not path:
             return {}
 
@@ -54,7 +66,15 @@ class FinanceAnalyzer:
             return json.load(fp)
 
     def load_thresholds(self, overrides: Optional[Dict[str, float]] = None) -> Dict[str, float]:
-        merged = dict(self._budget_thresholds)
+        # Always check DB first (in case thresholds were updated)
+        db_thresholds = self._load_budget_thresholds_from_db()
+        if db_thresholds:
+            base_thresholds = db_thresholds
+        else:
+            # Fallback to cached thresholds or file
+            base_thresholds = self._budget_thresholds or self._load_budget_thresholds(self._budget_config_path)
+        
+        merged = dict(base_thresholds)
         if overrides:
             merged.update(overrides)
         return merged

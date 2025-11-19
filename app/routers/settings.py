@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Header
 from pydantic import BaseModel
 
 from app.core.security import decode_access_token
+from app.db import dynamo
 from app.utils.scheduler import (
     get_scheduler_status,
     start_scheduler,
@@ -39,48 +40,40 @@ class SchedulerScheduleUpdate(BaseModel):
     minute: int  # Minute (0-59)
 
 
+class BudgetThresholdsUpdate(BaseModel):
+    thresholds: Dict[str, float]  # Category name -> amount
+
+
 @router.get("/scheduler")
 def get_scheduler_settings(user_id: str = Depends(get_current_user_id)) -> Dict:
     """
     Get current scheduler status and configuration.
+    Loads settings from DynamoDB.
     """
     status_info = get_scheduler_status()
     
-    # Get current schedule from the job if scheduler is running
-    current_schedule = None
+    # Get schedule from DynamoDB (source of truth)
+    db_settings = dynamo.get_scheduler_settings()
+    if db_settings:
+        current_schedule = {
+            "day": db_settings.get("day", 1),
+            "hour": db_settings.get("hour", 6),
+            "minute": db_settings.get("minute", 0),
+        }
+    else:
+        # Fallback to defaults if not in DB
+        current_schedule = {
+            "day": 1,
+            "hour": 6,
+            "minute": 0,
+        }
+    
+    # Get next run time from running scheduler if available
     if scheduler and scheduler.running:
         jobs = scheduler.get_jobs()
         for job in jobs:
-            if job.id == "monthly_expense_reports":
-                trigger = job.trigger
-                if isinstance(trigger, CronTrigger):
-                    # Extract schedule from trigger fields
-                    try:
-                        day_field = trigger.fields[2]  # Day of month field
-                        hour_field = trigger.fields[3]  # Hour field
-                        minute_field = trigger.fields[4]  # Minute field
-                        
-                        # Get first value from each field
-                        day = list(day_field.expressions[0].values)[0] if hasattr(day_field, 'expressions') and day_field.expressions else None
-                        hour = list(hour_field.expressions[0].values)[0] if hasattr(hour_field, 'expressions') and hour_field.expressions else None
-                        minute = list(minute_field.expressions[0].values)[0] if hasattr(minute_field, 'expressions') and minute_field.expressions else None
-                        
-                        current_schedule = {
-                            "day": day,
-                            "hour": hour,
-                            "minute": minute,
-                        }
-                    except (AttributeError, IndexError, TypeError):
-                        # Fallback: try to get from job kwargs or use defaults
-                        current_schedule = {
-                            "day": 1,
-                            "hour": 6,
-                            "minute": 0,
-                        }
-                    
-                    # Get next run time
-                    if job.next_run_time:
-                        current_schedule["next_run"] = job.next_run_time.isoformat()
+            if job.id == "monthly_expense_reports" and job.next_run_time:
+                current_schedule["next_run"] = job.next_run_time.isoformat()
                 break
     
     return {
@@ -93,10 +86,19 @@ def get_scheduler_settings(user_id: str = Depends(get_current_user_id)) -> Dict:
 @router.post("/scheduler/start")
 def start_scheduler_endpoint(user_id: str = Depends(get_current_user_id)) -> Dict:
     """
-    Start the scheduler.
+    Start the scheduler and save state to DB.
     """
     try:
         if scheduler and scheduler.running:
+            # Update DB state
+            db_settings = dynamo.get_scheduler_settings()
+            if db_settings:
+                dynamo.save_scheduler_settings(
+                    db_settings.get("day", 1),
+                    db_settings.get("hour", 6),
+                    db_settings.get("minute", 0),
+                    running=True
+                )
             return {
                 "success": True,
                 "message": "Scheduler is already running",
@@ -104,6 +106,17 @@ def start_scheduler_endpoint(user_id: str = Depends(get_current_user_id)) -> Dic
             }
         
         start_scheduler()
+        
+        # Save running state to DB
+        db_settings = dynamo.get_scheduler_settings()
+        if db_settings:
+            dynamo.save_scheduler_settings(
+                db_settings.get("day", 1),
+                db_settings.get("hour", 6),
+                db_settings.get("minute", 0),
+                running=True
+            )
+        
         return {
             "success": True,
             "message": "Scheduler started successfully",
@@ -117,10 +130,19 @@ def start_scheduler_endpoint(user_id: str = Depends(get_current_user_id)) -> Dic
 @router.post("/scheduler/stop")
 def stop_scheduler_endpoint(user_id: str = Depends(get_current_user_id)) -> Dict:
     """
-    Stop the scheduler.
+    Stop the scheduler and save state to DB.
     """
     try:
         if scheduler is None or not scheduler.running:
+            # Update DB state
+            db_settings = dynamo.get_scheduler_settings()
+            if db_settings:
+                dynamo.save_scheduler_settings(
+                    db_settings.get("day", 1),
+                    db_settings.get("hour", 6),
+                    db_settings.get("minute", 0),
+                    running=False
+                )
             return {
                 "success": True,
                 "message": "Scheduler is already stopped",
@@ -128,6 +150,17 @@ def stop_scheduler_endpoint(user_id: str = Depends(get_current_user_id)) -> Dict
             }
         
         stop_scheduler()
+        
+        # Save stopped state to DB
+        db_settings = dynamo.get_scheduler_settings()
+        if db_settings:
+            dynamo.save_scheduler_settings(
+                db_settings.get("day", 1),
+                db_settings.get("hour", 6),
+                db_settings.get("minute", 0),
+                running=False
+            )
+        
         return {
             "success": True,
             "message": "Scheduler stopped successfully",
@@ -177,13 +210,18 @@ def update_scheduler_schedule(
             
             logger.info(f"Scheduler schedule updated to: day={schedule.day}, hour={schedule.hour}, minute={schedule.minute}")
             
+            # Save to DynamoDB (preserve running state)
+            db_settings = dynamo.get_scheduler_settings()
+            running = db_settings.get("running", False) if db_settings else False
+            dynamo.save_scheduler_settings(schedule.day, schedule.hour, schedule.minute, running=running)
+            
             # Get updated job info
             job = scheduler.get_job("monthly_expense_reports")
             next_run = job.next_run_time.isoformat() if job and job.next_run_time else None
             
             return {
                 "success": True,
-                "message": f"Scheduler schedule updated. Next run: {next_run}",
+                "message": f"Scheduler schedule updated and saved to database. Next run: {next_run}",
                 "schedule": {
                     "day": schedule.day,
                     "hour": schedule.hour,
@@ -192,10 +230,14 @@ def update_scheduler_schedule(
                 }
             }
         else:
-            # Scheduler is not running, just return the schedule that will be used when started
+            # Scheduler is not running, save to DynamoDB for when it starts (preserve running state)
+            db_settings = dynamo.get_scheduler_settings()
+            running = db_settings.get("running", False) if db_settings else False
+            dynamo.save_scheduler_settings(schedule.day, schedule.hour, schedule.minute, running=running)
+            
             return {
                 "success": True,
-                "message": "Schedule updated. Start scheduler to apply changes.",
+                "message": "Schedule updated and saved to database. Start scheduler to apply changes.",
                 "schedule": {
                     "day": schedule.day,
                     "hour": schedule.hour,
@@ -206,4 +248,46 @@ def update_scheduler_schedule(
     except Exception as e:
         logger.error(f"Error updating scheduler schedule: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to update schedule: {str(e)}")
+
+
+@router.get("/thresholds")
+def get_budget_thresholds(user_id: str = Depends(get_current_user_id)) -> Dict:
+    """
+    Get current budget thresholds from DynamoDB.
+    """
+    thresholds = dynamo.get_budget_thresholds()
+    if thresholds is None:
+        # Return empty dict if not found
+        return {"thresholds": {}}
+    
+    return {"thresholds": thresholds}
+
+
+@router.put("/thresholds")
+def update_budget_thresholds(
+    update: BudgetThresholdsUpdate,
+    user_id: str = Depends(get_current_user_id)
+) -> Dict:
+    """
+    Update budget thresholds in DynamoDB.
+    These thresholds are used for notifications when spending crosses limits.
+    """
+    # Validate thresholds (all values must be positive)
+    for category, amount in update.thresholds.items():
+        if amount < 0:
+            raise HTTPException(status_code=400, detail=f"Threshold for {category} must be positive")
+    
+    try:
+        success = dynamo.save_budget_thresholds(update.thresholds)
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to save budget thresholds")
+        
+        return {
+            "success": True,
+            "message": "Budget thresholds updated successfully",
+            "thresholds": update.thresholds
+        }
+    except Exception as e:
+        logger.error(f"Error updating budget thresholds: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to update thresholds: {str(e)}")
 

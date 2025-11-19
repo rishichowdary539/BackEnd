@@ -31,8 +31,10 @@ def generate_notifications(expenses: List[Dict], summary: Dict, month: str) -> L
     """
     Generate user-friendly notifications based on spending patterns and thresholds.
     Returns list of notification objects with type, message, and severity.
+    Uses thresholds from DynamoDB (loaded via finance_analyzer).
     """
     notifications = []
+    # Load thresholds from DB (analyzer loads from DB first, then falls back to file)
     thresholds = finance_analyzer.load_thresholds()
     
     if not expenses:
