@@ -17,15 +17,26 @@ scheduler: BackgroundScheduler = None
 
 def monthly_reports_job():
     """Job function to trigger monthly expense reports for all enabled users"""
-    logger.info("Executing monthly reports job...")
+    from datetime import datetime
+    logger.info("=" * 80)
+    logger.info("CRON JOB TRIGGERED!")
+    logger.info(f"Triggered at: {datetime.utcnow().isoformat()} UTC")
+    logger.info("=" * 80)
     try:
         result = trigger_monthly_reports()
         if result.get("success"):
+            logger.info("=" * 80)
             logger.info("Monthly reports job completed successfully")
+            logger.info(f"Result: {result.get('message', 'N/A')}")
+            logger.info("=" * 80)
         else:
+            logger.error("=" * 80)
             logger.error(f"Monthly reports job failed: {result.get('error')}")
+            logger.error("=" * 80)
     except Exception as e:
+        logger.error("=" * 80)
         logger.error(f"Error in monthly reports job: {str(e)}")
+        logger.error("=" * 80, exc_info=True)
 
 
 def start_scheduler():
@@ -38,21 +49,34 @@ def start_scheduler():
     
     scheduler = BackgroundScheduler()
     
-    # For testing: Set to run today at 16:10 UTC (4:10 PM)
-    # TODO: Change back to day=1, hour=0, minute=0 for production
+    # ============================================================
+    # CRON SCHEDULE CONFIGURATION
+    # ============================================================
+    # Update these values to change when monthly reports run:
+    # - day: Day of month (1-31). Use 1 for 1st of every month
+    # - hour: Hour in UTC (0-23). Use 0 for midnight
+    # - minute: Minute (0-59). Use 0 for start of hour
+    # ============================================================
+    
+    # Production schedule: 1st day of month at 00:00 UTC
+    # day = 1
+    # hour = 0
+    # minute = 0
+    
+    # For testing: Set to run today at specific time
     from datetime import datetime
     today = datetime.utcnow()
-    day = today.day  # Today's day
+    day = today.day  # Today's day (19)
     hour = 16  # 4 PM
-    minute = 10  # 10 minutes
+    minute = 20  # 20 minutes (set to a few minutes from now for testing)
     
     # Add single system-wide job
-    scheduler.add_job(
+    job = scheduler.add_job(
         monthly_reports_job,
         trigger=CronTrigger(
-            day=day,      # Today's day (for testing)
-            hour=hour,    # 16 (4 PM)
-            minute=minute # 10 minutes
+            day=day,      # Day of month (1-31)
+            hour=hour,    # Hour in UTC (0-23)
+            minute=minute # Minute (0-59)
         ),
         id="monthly_expense_reports",
         name="Monthly Expense Reports",
@@ -60,7 +84,19 @@ def start_scheduler():
     )
     
     scheduler.start()
-    logger.info(f"Scheduler started. Monthly reports will run on day {day} at {hour:02d}:{minute:02d} UTC for all enabled users. (TESTING MODE)")
+    
+    # Log detailed information
+    logger.info("=" * 80)
+    logger.info("SCHEDULER STARTED")
+    logger.info(f"Schedule: Day {day} at {hour:02d}:{minute:02d} UTC")
+    if job.next_run_time:
+        logger.info(f"Next run: {job.next_run_time.isoformat()} UTC")
+        logger.info(f"Current time: {datetime.utcnow().isoformat()} UTC")
+        time_until_run = (job.next_run_time - datetime.utcnow()).total_seconds()
+        logger.info(f"Time until next run: {int(time_until_run / 60)} minutes ({int(time_until_run)} seconds)")
+    else:
+        logger.warning("No next run time calculated!")
+    logger.info("=" * 80)
 
 
 def stop_scheduler():

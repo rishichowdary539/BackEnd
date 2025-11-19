@@ -55,19 +55,49 @@ def get_scheduler_settings(user_id: str = Depends(get_current_user_id)) -> Dict:
     
     # Get user's personal scheduler settings from DynamoDB
     db_settings = dynamo.get_scheduler_settings(user_id)
-    # Schedule is fixed: 1st day at 00:00 UTC
+    enabled = db_settings.get("enabled", False) if db_settings else False
+    
+    # Get actual schedule from running scheduler job (not from database)
     current_schedule = {
-        "day": 1,
-        "hour": 0,
-        "minute": 0,
-        "enabled": db_settings.get("enabled", False) if db_settings else False,
+        "day": 1,  # Default
+        "hour": 0,  # Default
+        "minute": 0,  # Default
+        "enabled": enabled,
     }
     
-    # Get next run time from running scheduler if available (system-wide)
+    # Get actual schedule from running scheduler if available (system-wide)
     if scheduler and scheduler.running:
         job = scheduler.get_job("monthly_expense_reports")
-        if job and job.next_run_time:
-            current_schedule["next_run"] = job.next_run_time.isoformat()
+        if job and job.trigger:
+            # Extract schedule from the cron trigger
+            trigger = job.trigger
+            try:
+                # CronTrigger stores day, hour, minute as attributes
+                if hasattr(trigger, 'day') and trigger.day is not None:
+                    # If day is a set, get the first value, otherwise use the value directly
+                    if isinstance(trigger.day, set):
+                        current_schedule["day"] = list(trigger.day)[0] if trigger.day else 1
+                    else:
+                        current_schedule["day"] = trigger.day
+                
+                if hasattr(trigger, 'hour') and trigger.hour is not None:
+                    if isinstance(trigger.hour, set):
+                        current_schedule["hour"] = list(trigger.hour)[0] if trigger.hour else 0
+                    else:
+                        current_schedule["hour"] = trigger.hour
+                
+                if hasattr(trigger, 'minute') and trigger.minute is not None:
+                    if isinstance(trigger.minute, set):
+                        current_schedule["minute"] = list(trigger.minute)[0] if trigger.minute else 0
+                    else:
+                        current_schedule["minute"] = trigger.minute
+            except Exception as e:
+                logger.warning(f"Could not extract schedule from trigger: {str(e)}")
+                # Keep defaults
+            
+            # Get next run time
+            if job.next_run_time:
+                current_schedule["next_run"] = job.next_run_time.isoformat()
     
     return {
         "service_running": status_info.get("running", False),  # System-wide scheduler service status
