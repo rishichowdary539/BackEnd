@@ -90,9 +90,11 @@ def start_scheduler():
     logger.info("SCHEDULER STARTED")
     logger.info(f"Schedule: Day {day} at {hour:02d}:{minute:02d} UTC")
     if job.next_run_time:
+        from datetime import timezone
         logger.info(f"Next run: {job.next_run_time.isoformat()} UTC")
-        logger.info(f"Current time: {datetime.utcnow().isoformat()} UTC")
-        time_until_run = (job.next_run_time - datetime.utcnow()).total_seconds()
+        current_time = datetime.now(timezone.utc)
+        logger.info(f"Current time: {current_time.isoformat()} UTC")
+        time_until_run = (job.next_run_time - current_time).total_seconds()
         logger.info(f"Time until next run: {int(time_until_run / 60)} minutes ({int(time_until_run)} seconds)")
     else:
         logger.warning("No next run time calculated!")
@@ -110,60 +112,13 @@ def stop_scheduler():
 
 
 def refresh_scheduler_jobs():
-    """Refresh all scheduler jobs from database - useful if users were enabled/disabled externally"""
-    global scheduler
-    
-    if scheduler is None or not scheduler.running:
-        logger.warning("Scheduler is not running, cannot refresh jobs")
-        return
-    
-    from app.db import dynamo
-    from apscheduler.triggers.cron import CronTrigger
-    
-    # Get all enabled users from database
-    enabled_users = dynamo.get_all_users_with_scheduler_enabled()
-    enabled_user_ids = set(enabled_users)
-    
-    # Get all current jobs
-    current_jobs = scheduler.get_jobs()
-    current_user_ids = set()
-    
-    # Remove jobs for users who are no longer enabled
-    for job in current_jobs:
-        if job.id.startswith("monthly_expense_reports_"):
-            job_user_id = job.id.replace("monthly_expense_reports_", "")
-            current_user_ids.add(job_user_id)
-            if job_user_id not in enabled_user_ids:
-                try:
-                    scheduler.remove_job(job.id)
-                    logger.info(f"Removed scheduler job for disabled user: {job_user_id}")
-                except:
-                    pass
-    
-    # Add/update jobs for enabled users
-    for user_id in enabled_users:
-        db_settings = dynamo.get_scheduler_settings(user_id)
-        if db_settings:
-            day = db_settings.get("day", 1)
-            hour = db_settings.get("hour", 6)
-            minute = db_settings.get("minute", 0)
-            
-            job_id = f"monthly_expense_reports_{user_id}"
-            
-            # Add or update the job
-            scheduler.add_job(
-                monthly_reports_job_for_user,
-                args=[user_id],
-                trigger=CronTrigger(day=day, hour=hour, minute=minute),
-                id=job_id,
-                name=f"Monthly Expense Reports - {user_id}",
-                replace_existing=True
-            )
-            
-            if user_id not in current_user_ids:
-                logger.info(f"Added scheduler job for user {user_id}: day={day}, hour={hour}, minute={minute}")
-            else:
-                logger.info(f"Refreshed scheduler job for user {user_id}: day={day}, hour={hour}, minute={minute}")
+    """
+    Refresh scheduler job - not needed for single system-wide job.
+    The scheduler uses a fixed schedule, so this function is kept for compatibility.
+    """
+    # No-op: Single system-wide job doesn't need refreshing
+    # The schedule is fixed and users are checked at runtime
+    pass
 
 
 def get_scheduler_status():
