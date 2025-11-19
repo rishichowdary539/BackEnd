@@ -205,12 +205,16 @@ def update_scheduler_schedule(
         raise HTTPException(status_code=400, detail="Minute must be between 0 and 59")
     
     try:
+        logger.info(f"Updating schedule for user {user_id}: day={schedule.day}, hour={schedule.hour}, minute={schedule.minute}")
+        
         # Get user's current enabled state
         db_settings = dynamo.get_scheduler_settings(user_id)
         enabled = db_settings.get("enabled", False) if db_settings else False
+        logger.info(f"User {user_id} scheduler enabled status: {enabled}")
         
         # Save user's schedule preference to DB
         dynamo.save_scheduler_settings(user_id, schedule.day, schedule.hour, schedule.minute, enabled=enabled)
+        logger.info(f"Saved schedule to database for user {user_id}")
         
         # If this user has scheduler enabled and system scheduler is running, update their job
         if enabled and scheduler and scheduler.running:
@@ -218,25 +222,43 @@ def update_scheduler_schedule(
             from apscheduler.triggers.cron import CronTrigger
             
             job_id = f"monthly_expense_reports_{user_id}"
+            
+            # Remove existing job if it exists
             try:
-                scheduler.remove_job(job_id)
-            except:
-                pass  # Job doesn't exist, that's fine
+                existing_job = scheduler.get_job(job_id)
+                if existing_job:
+                    scheduler.remove_job(job_id)
+                    logger.info(f"Removed existing job for user {user_id}")
+            except Exception as e:
+                logger.warning(f"Could not remove existing job for user {user_id}: {str(e)}")
             
             # Add updated job for this user
-            scheduler.add_job(
-                monthly_reports_job_for_user,
-                args=[user_id],
-                trigger=CronTrigger(
-                    day=schedule.day,
-                    hour=schedule.hour,
-                    minute=schedule.minute
-                ),
-                id=job_id,
-                name=f"Monthly Expense Reports - {user_id}",
-                replace_existing=True
-            )
-            logger.info(f"Updated scheduler job for user {user_id}: day={schedule.day}, hour={schedule.hour}, minute={schedule.minute}")
+            try:
+                scheduler.add_job(
+                    monthly_reports_job_for_user,
+                    args=[user_id],
+                    trigger=CronTrigger(
+                        day=schedule.day,
+                        hour=schedule.hour,
+                        minute=schedule.minute
+                    ),
+                    id=job_id,
+                    name=f"Monthly Expense Reports - {user_id}",
+                    replace_existing=True
+                )
+                logger.info(f"Successfully updated scheduler job for user {user_id}: day={schedule.day}, hour={schedule.hour}, minute={schedule.minute}")
+                
+                # Verify the job was added and get next run time
+                import time
+                time.sleep(0.1)  # Small delay to ensure job is registered
+                verify_job = scheduler.get_job(job_id)
+                if verify_job:
+                    logger.info(f"Job verified: {verify_job.id}, next_run={verify_job.next_run_time}")
+                else:
+                    logger.error(f"Job verification failed: job {job_id} not found after adding")
+            except Exception as e:
+                logger.error(f"Failed to add/update job for user {user_id}: {str(e)}", exc_info=True)
+                raise HTTPException(status_code=500, detail=f"Failed to update scheduler job: {str(e)}")
         
         # Get next run time if scheduler is running (for this specific user)
         next_run = None
@@ -245,6 +267,9 @@ def update_scheduler_schedule(
             job = scheduler.get_job(job_id)
             if job and job.next_run_time:
                 next_run = job.next_run_time.isoformat()
+                logger.info(f"Next run time for user {user_id}: {next_run}")
+            else:
+                logger.warning(f"No next_run time found for job {job_id}")
         
         return {
             "success": True,
