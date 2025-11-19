@@ -110,31 +110,32 @@ def start_scheduler_endpoint(user_id: str = Depends(get_current_user_id)) -> Dic
         if scheduler is None or not scheduler.running:
             start_scheduler()
         else:
-            # Scheduler is already running, update jobs for all enabled users
+            # Scheduler is already running, add or update job for this user
             from app.utils.scheduler import monthly_reports_job_for_user
             from apscheduler.triggers.cron import CronTrigger
             
-            # Remove old job for this user if it exists
             job_id = f"monthly_expense_reports_{user_id}"
-            try:
-                scheduler.remove_job(job_id)
-            except:
-                pass  # Job doesn't exist, that's fine
+            new_trigger = CronTrigger(day=day, hour=hour, minute=minute)
             
-            # Add new job with updated schedule
-            scheduler.add_job(
-                monthly_reports_job_for_user,
-                args=[user_id],
-                trigger=CronTrigger(
-                    day=day,
-                    hour=hour,
-                    minute=minute
-                ),
-                id=job_id,
-                name=f"Monthly Expense Reports - {user_id}",
-                replace_existing=True
-            )
-            logger.info(f"Updated scheduler job for user {user_id}: day={day}, hour={hour}, minute={minute}")
+            try:
+                existing_job = scheduler.get_job(job_id)
+                if existing_job:
+                    # Job exists, reschedule it
+                    scheduler.reschedule_job(job_id, trigger=new_trigger)
+                    logger.info(f"Rescheduled job for user {user_id}: day={day}, hour={hour}, minute={minute}")
+                else:
+                    # Job doesn't exist, add it
+                    scheduler.add_job(
+                        monthly_reports_job_for_user,
+                        args=[user_id],
+                        trigger=new_trigger,
+                        id=job_id,
+                        name=f"Monthly Expense Reports - {user_id}",
+                        replace_existing=True
+                    )
+                    logger.info(f"Added scheduler job for user {user_id}: day={day}, hour={hour}, minute={minute}")
+            except Exception as e:
+                logger.error(f"Failed to add/update job for user {user_id}: {str(e)}", exc_info=True)
         
         return {
             "success": True,
@@ -222,42 +223,43 @@ def update_scheduler_schedule(
             from apscheduler.triggers.cron import CronTrigger
             
             job_id = f"monthly_expense_reports_{user_id}"
+            new_trigger = CronTrigger(
+                day=schedule.day,
+                hour=schedule.hour,
+                minute=schedule.minute
+            )
             
-            # Remove existing job if it exists
             try:
                 existing_job = scheduler.get_job(job_id)
                 if existing_job:
-                    scheduler.remove_job(job_id)
-                    logger.info(f"Removed existing job for user {user_id}")
-            except Exception as e:
-                logger.warning(f"Could not remove existing job for user {user_id}: {str(e)}")
-            
-            # Add updated job for this user
-            try:
-                scheduler.add_job(
-                    monthly_reports_job_for_user,
-                    args=[user_id],
-                    trigger=CronTrigger(
-                        day=schedule.day,
-                        hour=schedule.hour,
-                        minute=schedule.minute
-                    ),
-                    id=job_id,
-                    name=f"Monthly Expense Reports - {user_id}",
-                    replace_existing=True
-                )
-                logger.info(f"Successfully updated scheduler job for user {user_id}: day={schedule.day}, hour={schedule.hour}, minute={schedule.minute}")
+                    # Job exists, reschedule it with new trigger
+                    scheduler.reschedule_job(job_id, trigger=new_trigger)
+                    logger.info(f"Rescheduled existing job for user {user_id}: day={schedule.day}, hour={schedule.hour}, minute={schedule.minute}")
+                else:
+                    # Job doesn't exist, add it
+                    scheduler.add_job(
+                        monthly_reports_job_for_user,
+                        args=[user_id],
+                        trigger=new_trigger,
+                        id=job_id,
+                        name=f"Monthly Expense Reports - {user_id}",
+                        replace_existing=True
+                    )
+                    logger.info(f"Added new job for user {user_id}: day={schedule.day}, hour={schedule.hour}, minute={schedule.minute}")
                 
-                # Verify the job was added and get next run time
+                # Verify the job was updated
                 import time
-                time.sleep(0.1)  # Small delay to ensure job is registered
+                time.sleep(0.2)  # Small delay to ensure job is registered
                 verify_job = scheduler.get_job(job_id)
                 if verify_job:
-                    logger.info(f"Job verified: {verify_job.id}, next_run={verify_job.next_run_time}")
+                    logger.info(f"Job verified: {verify_job.id}, next_run={verify_job.next_run_time}, trigger={verify_job.trigger}")
                 else:
-                    logger.error(f"Job verification failed: job {job_id} not found after adding")
+                    logger.error(f"Job verification failed: job {job_id} not found after update")
+                    raise HTTPException(status_code=500, detail="Job update failed: job not found after update")
+            except HTTPException:
+                raise
             except Exception as e:
-                logger.error(f"Failed to add/update job for user {user_id}: {str(e)}", exc_info=True)
+                logger.error(f"Failed to update job for user {user_id}: {str(e)}", exc_info=True)
                 raise HTTPException(status_code=500, detail=f"Failed to update scheduler job: {str(e)}")
         
         # Get next run time if scheduler is running (for this specific user)
