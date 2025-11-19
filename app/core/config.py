@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
 
+
     # Custom Library Settings (if needed)
     BUDGET_THRESHOLDS_JSON: str = Field(default="config/budget_thresholds.json")
 
