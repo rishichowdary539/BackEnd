@@ -6,6 +6,7 @@ import logging
 import os
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.date import DateTrigger
 
 from app.utils.lambda_scheduler import trigger_monthly_reports
 
@@ -63,41 +64,61 @@ def start_scheduler():
     # hour = 0
     # minute = 0
     
-    # For testing: Set to run today at specific time
-    from datetime import datetime
-    today = datetime.utcnow()
-    day = today.day  # Today's day (19)
-    hour = 16  # 4 PM
-    minute = 20  # 20 minutes (set to a few minutes from now for testing)
+    # For testing: Use DateTrigger to run at a specific datetime (2 minutes from now)
+    from datetime import datetime, timezone, timedelta
+    now = datetime.now(timezone.utc)
+    future_time = now + timedelta(minutes=2)
     
-    # Add single system-wide job
+    logger.info(f"TESTING MODE: Using DateTrigger to run at {future_time.isoformat()} UTC (in 2 minutes)")
+    
+    # Use DateTrigger for testing (runs once at specific time)
     job = scheduler.add_job(
         monthly_reports_job,
-        trigger=CronTrigger(
-            day=day,      # Day of month (1-31)
-            hour=hour,    # Hour in UTC (0-23)
-            minute=minute # Minute (0-59)
-        ),
+        trigger=DateTrigger(run_date=future_time),
         id="monthly_expense_reports",
-        name="Monthly Expense Reports",
+        name="Monthly Expense Reports (TEST MODE)",
         replace_existing=True
     )
+    
+    # For production, uncomment this and comment out the DateTrigger above:
+    # job = scheduler.add_job(
+    #     monthly_reports_job,
+    #     trigger=CronTrigger(
+    #         day=1,      # 1st day of month
+    #         hour=0,     # 00:00 UTC
+    #         minute=0    # Start of hour
+    #     ),
+    #     id="monthly_expense_reports",
+    #     name="Monthly Expense Reports",
+    #     replace_existing=True
+    # )
     
     scheduler.start()
     
     # Log detailed information
+    from datetime import timezone
     logger.info("=" * 80)
     logger.info("SCHEDULER STARTED")
-    logger.info(f"Schedule: Day {day} at {hour:02d}:{minute:02d} UTC")
+    current_time = datetime.now(timezone.utc)
+    logger.info(f"Current time: {current_time.isoformat()} UTC")
+    
     if job.next_run_time:
-        from datetime import timezone
-        logger.info(f"Next run: {job.next_run_time.isoformat()} UTC")
-        current_time = datetime.now(timezone.utc)
-        logger.info(f"Current time: {current_time.isoformat()} UTC")
+        logger.info(f"Next run: {job.next_run_time.isoformat()}")
         time_until_run = (job.next_run_time - current_time).total_seconds()
-        logger.info(f"Time until next run: {int(time_until_run / 60)} minutes ({int(time_until_run)} seconds)")
+        if time_until_run > 0:
+            logger.info(f"Time until next run: {int(time_until_run / 60)} minutes ({int(time_until_run)} seconds)")
+        else:
+            logger.warning(f"Next run time is in the past! ({int(abs(time_until_run) / 60)} minutes ago)")
+            logger.warning("Job may not trigger!")
     else:
-        logger.warning("No next run time calculated!")
+        logger.error("No next run time calculated! Job may not trigger!")
+    
+    # Verify scheduler is running
+    if scheduler.running:
+        logger.info(f"Scheduler is RUNNING: {scheduler.running}")
+        logger.info(f"Number of jobs: {len(scheduler.get_jobs())}")
+    else:
+        logger.error("Scheduler is NOT running!")
     logger.info("=" * 80)
 
 
