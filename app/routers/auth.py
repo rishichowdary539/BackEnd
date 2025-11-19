@@ -30,9 +30,26 @@ def register(user: UserCreate):
 @router.post("/login")
 def login(login_data: UserLogin):
     # Accept JSON body with email and password
-    user = dynamo.get_user_by_email(login_data.email)
-    if not user or not verify_password(login_data.password, user["password_hash"]):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    try:
+        logger.info(f"Login attempt for email: {login_data.email}")
+        user = dynamo.get_user_by_email(login_data.email)
+        
+        if not user:
+            logger.warning(f"User not found: {login_data.email}")
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+        
+        if not verify_password(login_data.password, user["password_hash"]):
+            logger.warning(f"Invalid password for user: {login_data.email}")
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
-    access_token = create_access_token(data={"sub": user["user_id"]})
-    return {"access_token": access_token, "token_type": "bearer"}
+        access_token = create_access_token(data={"sub": user["user_id"]})
+        logger.info(f"Login successful for user: {login_data.email}")
+        return {"access_token": access_token, "token_type": "bearer"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Login error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Login failed: {str(e)}")
