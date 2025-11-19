@@ -11,7 +11,7 @@ from app.utils.lambda_scheduler import trigger_monthly_reports
 
 logger = logging.getLogger(__name__)
 
-# Scheduler instance
+# Scheduler instance (exported for use in settings router)
 scheduler: BackgroundScheduler = None
 
 
