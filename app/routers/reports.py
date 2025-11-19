@@ -82,6 +82,8 @@ def generate_monthly_report(month: str, user_id: str = Depends(get_current_user_
             logger.error(f"Error uploading CSV: {str(e)}")
             csv_url = None
 
+        # Note: Email is only sent automatically via monthly scheduler, not for manual report generation
+
         return {
             "month": month,
             "total_spent": summary["monthly_total"],
