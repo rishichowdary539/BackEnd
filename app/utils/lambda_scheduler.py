@@ -99,6 +99,7 @@ def trigger_monthly_reports() -> dict:
         }
     
     logger.info(f"Triggering monthly reports at {datetime.utcnow()} for {len(enabled_user_ids)} users")
+    logger.info(f"Enabled user IDs: {enabled_user_ids}")
     
     # Send user IDs to Lambda so it only processes enabled users
     payload = {
@@ -106,5 +107,6 @@ def trigger_monthly_reports() -> dict:
         "triggered_at": datetime.utcnow().isoformat()
     }
     
+    logger.info(f"Sending payload to Lambda: {payload}")
     return invoke_lambda_function(payload)
 

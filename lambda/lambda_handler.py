@@ -42,6 +42,7 @@ def lambda_handler(event, context):
 
         logger.info(f"Processing monthly reports for {month}")
         logger.info(f"Using tables: {USERS_TABLE}, {EXPENSES_TABLE}")
+        logger.info(f"Received event: {json.dumps(event, default=str)}")
 
         # Get users to process - check if user_ids are provided in event (from scheduler)
         user_ids_to_process = None
@@ -49,6 +50,9 @@ def lambda_handler(event, context):
             user_ids_to_process = event.get("user_ids")
             if user_ids_to_process:
                 logger.info(f"Processing reports for {len(user_ids_to_process)} enabled users")
+                logger.info(f"User IDs to process: {user_ids_to_process}")
+            else:
+                logger.info("No user_ids in event, will process all users")
         
         # Get users - either specific users or all users
         if user_ids_to_process:
@@ -56,14 +60,21 @@ def lambda_handler(event, context):
             users = []
             for user_id in user_ids_to_process:
                 try:
+                    logger.info(f"Fetching user: {user_id}")
                     response = users_table.get_item(Key={"user_id": user_id})
                     if "Item" in response:
+                        logger.info(f"Found user {user_id} in database")
                         users.append(response["Item"])
+                    else:
+                        logger.warning(f"User {user_id} not found in database (table: {USERS_TABLE})")
                 except Exception as e:
-                    logger.error(f"Error fetching user {user_id}: {str(e)}")
+                    logger.error(f"Error fetching user {user_id}: {str(e)}", exc_info=True)
+            logger.info(f"Total users fetched: {len(users)}")
         else:
             # Get all users (backward compatibility)
+            logger.info("No user_ids provided, scanning all users")
             users = users_table.scan().get("Items", [])
+            logger.info(f"Found {len(users)} total users in database")
 
         if not users:
             logger.info("No users found in database")

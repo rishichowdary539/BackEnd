@@ -71,13 +71,12 @@ def get_scheduler_settings(user_id: str = Depends(get_current_user_id)) -> Dict:
             "enabled": False,
         }
     
-    # Get next run time from running scheduler if available
+    # Get next run time from running scheduler if available (for this specific user)
     if scheduler and scheduler.running:
-        jobs = scheduler.get_jobs()
-        for job in jobs:
-            if job.id == "monthly_expense_reports" and job.next_run_time:
-                current_schedule["next_run"] = job.next_run_time.isoformat()
-                break
+        job_id = f"monthly_expense_reports_{user_id}"
+        job = scheduler.get_job(job_id)
+        if job and job.next_run_time:
+            current_schedule["next_run"] = job.next_run_time.isoformat()
     
     return {
         "service_running": status_info.get("running", False),  # System-wide scheduler service status
@@ -110,6 +109,32 @@ def start_scheduler_endpoint(user_id: str = Depends(get_current_user_id)) -> Dic
         # Ensure system-wide scheduler service is running
         if scheduler is None or not scheduler.running:
             start_scheduler()
+        else:
+            # Scheduler is already running, update jobs for all enabled users
+            from app.utils.scheduler import monthly_reports_job_for_user
+            from apscheduler.triggers.cron import CronTrigger
+            
+            # Remove old job for this user if it exists
+            job_id = f"monthly_expense_reports_{user_id}"
+            try:
+                scheduler.remove_job(job_id)
+            except:
+                pass  # Job doesn't exist, that's fine
+            
+            # Add new job with updated schedule
+            scheduler.add_job(
+                monthly_reports_job_for_user,
+                args=[user_id],
+                trigger=CronTrigger(
+                    day=day,
+                    hour=hour,
+                    minute=minute
+                ),
+                id=job_id,
+                name=f"Monthly Expense Reports - {user_id}",
+                replace_existing=True
+            )
+            logger.info(f"Updated scheduler job for user {user_id}: day={day}, hour={hour}, minute={minute}")
         
         return {
             "success": True,
@@ -141,8 +166,16 @@ def stop_scheduler_endpoint(user_id: str = Depends(get_current_user_id)) -> Dict
         # Disable scheduler for this user only
         dynamo.save_scheduler_settings(user_id, day, hour, minute, enabled=False)
         
+        # Remove this user's job from the scheduler
+        if scheduler and scheduler.running:
+            job_id = f"monthly_expense_reports_{user_id}"
+            try:
+                scheduler.remove_job(job_id)
+                logger.info(f"Removed scheduler job for user {user_id}")
+            except:
+                pass  # Job doesn't exist, that's fine
+        
         # Note: We don't stop the system scheduler as other users might have it enabled
-        # The scheduler will simply skip this user when processing
         
         return {
             "success": True,
@@ -179,34 +212,37 @@ def update_scheduler_schedule(
         # Save user's schedule preference to DB
         dynamo.save_scheduler_settings(user_id, schedule.day, schedule.hour, schedule.minute, enabled=enabled)
         
-        # If this user has scheduler enabled and system scheduler is running, we may need to update it
-        # For simplicity, we'll use the first enabled user's schedule for the system scheduler
+        # If this user has scheduler enabled and system scheduler is running, update their job
         if enabled and scheduler and scheduler.running:
-            # Get all enabled users and use the first one's schedule (or this user's if they're the only one)
-            enabled_users = dynamo.get_all_users_with_scheduler_enabled()
-            if enabled_users and enabled_users[0] == user_id:
-                # This user is the first enabled user, update system scheduler
-                from app.utils.scheduler import monthly_reports_job
-                from apscheduler.triggers.cron import CronTrigger
-                
-                scheduler.remove_job("monthly_expense_reports")
-                scheduler.add_job(
-                    monthly_reports_job,
-                    trigger=CronTrigger(
-                        day=schedule.day,
-                        hour=schedule.hour,
-                        minute=schedule.minute
-                    ),
-                    id="monthly_expense_reports",
-                    name="Monthly Expense Reports",
-                    replace_existing=True
-                )
-                logger.info(f"System scheduler schedule updated to: day={schedule.day}, hour={schedule.hour}, minute={schedule.minute}")
+            from app.utils.scheduler import monthly_reports_job_for_user
+            from apscheduler.triggers.cron import CronTrigger
+            
+            job_id = f"monthly_expense_reports_{user_id}"
+            try:
+                scheduler.remove_job(job_id)
+            except:
+                pass  # Job doesn't exist, that's fine
+            
+            # Add updated job for this user
+            scheduler.add_job(
+                monthly_reports_job_for_user,
+                args=[user_id],
+                trigger=CronTrigger(
+                    day=schedule.day,
+                    hour=schedule.hour,
+                    minute=schedule.minute
+                ),
+                id=job_id,
+                name=f"Monthly Expense Reports - {user_id}",
+                replace_existing=True
+            )
+            logger.info(f"Updated scheduler job for user {user_id}: day={schedule.day}, hour={schedule.hour}, minute={schedule.minute}")
         
-        # Get next run time if scheduler is running
+        # Get next run time if scheduler is running (for this specific user)
         next_run = None
         if scheduler and scheduler.running:
-            job = scheduler.get_job("monthly_expense_reports")
+            job_id = f"monthly_expense_reports_{user_id}"
+            job = scheduler.get_job(job_id)
             if job and job.next_run_time:
                 next_run = job.next_run_time.isoformat()
         

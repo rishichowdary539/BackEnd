@@ -46,6 +46,14 @@ async def trigger_lambda_manually(user_id: str = Depends(get_current_user_id)) -
     This will send emails to all users with scheduler enabled.
     """
     try:
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        # Check how many users have scheduler enabled
+        from app.db import dynamo
+        enabled_users = dynamo.get_all_users_with_scheduler_enabled()
+        logger.info(f"Found {len(enabled_users)} users with scheduler enabled: {enabled_users}")
+        
         # Use trigger_monthly_reports() which gets enabled users and sends to Lambda
         result = trigger_monthly_reports()
         
@@ -55,15 +63,37 @@ async def trigger_lambda_manually(user_id: str = Depends(get_current_user_id)) -
                 detail=result.get("error", "Failed to invoke Lambda function")
             )
         
+        # Parse the result to get a better message
+        message = result.get("message", "Monthly reports triggered successfully")
+        if result.get("result"):
+            import json
+            try:
+                lambda_result = json.loads(result.get("result"))
+                if isinstance(lambda_result, dict) and "body" in lambda_result:
+                    body = json.loads(lambda_result["body"])
+                    if body.get("message"):
+                        message = body["message"]
+                    if body.get("users_processed") is not None:
+                        users_processed = body.get("users_processed", 0)
+                        if users_processed == 0:
+                            message = f"No users found with scheduler enabled. Please make sure you have clicked 'Start' in the scheduler settings and have expenses for the current month."
+                        else:
+                            message = f"Successfully processed {users_processed} user(s). Check your email!"
+            except:
+                pass
+        
         return LambdaTriggerResponse(
             success=True,
-            message=result.get("message", "Monthly reports triggered successfully"),
+            message=message,
             result=result.get("result")
         )
     
     except HTTPException:
         raise
     except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error triggering Lambda: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error triggering Lambda: {str(e)}")
 
 
