@@ -84,29 +84,17 @@ def trigger_monthly_reports() -> dict:
     """
     Trigger monthly expense reports for all users with scheduler enabled.
     This is called by the scheduler.
+    Lambda will handle finding enabled users and processing them.
     """
-    from app.db import dynamo
+    logger.info(f"Triggering monthly reports at {datetime.utcnow()}")
+    logger.info("Lambda will handle finding enabled users and processing reports")
     
-    # Get all users with scheduler enabled
-    enabled_user_ids = dynamo.get_all_users_with_scheduler_enabled()
-    
-    if not enabled_user_ids:
-        logger.info("No users have scheduler enabled. Skipping monthly reports.")
-        return {
-            "success": True,
-            "message": "No users have scheduler enabled",
-            "users_processed": 0
-        }
-    
-    logger.info(f"Triggering monthly reports at {datetime.utcnow()} for {len(enabled_user_ids)} users")
-    logger.info(f"Enabled user IDs: {enabled_user_ids}")
-    
-    # Send user IDs to Lambda so it only processes enabled users
+    # Send empty payload - Lambda will scan for enabled users itself
     payload = {
-        "user_ids": enabled_user_ids,
-        "triggered_at": datetime.utcnow().isoformat()
+        "triggered_at": datetime.utcnow().isoformat(),
+        "triggered_by": "scheduler"
     }
     
-    logger.info(f"Sending payload to Lambda: {payload}")
+    logger.info(f"Invoking Lambda with payload: {payload}")
     return invoke_lambda_function(payload)
 

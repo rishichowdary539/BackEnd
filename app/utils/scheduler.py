@@ -65,40 +65,61 @@ def start_scheduler():
     # hour = 0
     # minute = 0
     
-    # For testing: Use IntervalTrigger to run after 2 minutes, then remove job after first run
+    # For testing: Use IntervalTrigger to run after 10 seconds (very short for testing)
     from datetime import datetime, timezone, timedelta
     import time
     
     now = datetime.now(timezone.utc)
-    future_time = now + timedelta(minutes=2)
     
-    logger.info(f"TESTING MODE: Using IntervalTrigger to run in 2 minutes (one-time)")
+    logger.info(f"TESTING MODE: Using IntervalTrigger to run in 10 seconds (one-time)")
     logger.info(f"Current time: {now.isoformat()} UTC")
-    logger.info(f"Scheduled time: {future_time.isoformat()} UTC")
     
     # Create a wrapper function that runs the job once, then removes itself
     def one_time_job():
         try:
+            logger.info("=" * 80)
+            logger.info("ONE-TIME JOB FUNCTION CALLED!")
+            logger.info("=" * 80)
             monthly_reports_job()
+        except Exception as e:
+            logger.error(f"Error in one_time_job: {str(e)}", exc_info=True)
         finally:
             # Remove the job after it runs once
             try:
                 scheduler.remove_job("monthly_expense_reports")
                 logger.info("Test job removed after execution")
-            except:
-                pass
+            except Exception as e:
+                logger.warning(f"Could not remove job: {str(e)}")
     
-    # Use IntervalTrigger for testing (will run once, then remove itself)
+    # Start scheduler FIRST
+    logger.info("Starting scheduler...")
+    try:
+        scheduler.start()
+        logger.info("Scheduler started successfully")
+    except Exception as e:
+        logger.error(f"Failed to start scheduler: {str(e)}", exc_info=True)
+        raise
+    
+    # Small delay to ensure scheduler is fully started
+    time.sleep(1.0)
+    logger.info("Scheduler startup delay completed")
+    
+    # NOW add the job AFTER scheduler is started
+    # Use IntervalTrigger for testing (will run once after 10 seconds, then remove itself)
+    # Using seconds=10 for quick testing
+    logger.info("Adding job to scheduler...")
     job = scheduler.add_job(
         one_time_job,
-        trigger=IntervalTrigger(minutes=2),
+        trigger=IntervalTrigger(seconds=10),
         id="monthly_expense_reports",
         name="Monthly Expense Reports (TEST MODE - ONE TIME)",
         replace_existing=True,
         max_instances=1  # Only allow one instance to run at a time
     )
     
-    # For production, uncomment this and comment out the DateTrigger above:
+    logger.info(f"Job added to scheduler: {job.id}")
+    
+    # For production, uncomment this and comment out the IntervalTrigger above:
     # job = scheduler.add_job(
     #     monthly_reports_job,
     #     trigger=CronTrigger(
@@ -110,12 +131,6 @@ def start_scheduler():
     #     name="Monthly Expense Reports",
     #     replace_existing=True
     # )
-    
-    # Start scheduler BEFORE adding job to ensure it's ready
-    scheduler.start()
-    
-    # Small delay to ensure scheduler is fully started
-    time.sleep(0.5)
     
     # Log detailed information
     from datetime import timezone

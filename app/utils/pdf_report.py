@@ -6,8 +6,7 @@ import boto3
 from botocore.exceptions import ClientError
 from app.core.config import settings
 
-# Initialize S3 client using default AWS credential chain
-# (environment variables, AWS credentials file, or IAM role)
+# Initialize S3 client
 s3 = boto3.client("s3", region_name=settings.S3_REGION)
 
 

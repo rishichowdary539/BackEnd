@@ -44,19 +44,19 @@ def lambda_handler(event, context):
         logger.info(f"Using tables: {USERS_TABLE}, {EXPENSES_TABLE}")
         logger.info(f"Received event: {json.dumps(event, default=str)}")
 
-        # Get users to process - check if user_ids are provided in event (from scheduler)
+        # Get users to process - check if user_ids are provided in event (from manual trigger)
         user_ids_to_process = None
         if event and isinstance(event, dict):
             user_ids_to_process = event.get("user_ids")
             if user_ids_to_process:
-                logger.info(f"Processing reports for {len(user_ids_to_process)} enabled users")
+                logger.info(f"Processing reports for {len(user_ids_to_process)} specific users")
                 logger.info(f"User IDs to process: {user_ids_to_process}")
             else:
-                logger.info("No user_ids in event, will process all users")
+                logger.info("No user_ids in event, will scan for users with scheduler_enabled=True")
         
-        # Get users - either specific users or all users
+        # Get users - either specific users or scan for enabled users
         if user_ids_to_process:
-            # Get specific users with scheduler enabled
+            # Get specific users (from manual trigger with user_ids)
             users = []
             for user_id in user_ids_to_process:
                 try:
@@ -71,10 +71,18 @@ def lambda_handler(event, context):
                     logger.error(f"Error fetching user {user_id}: {str(e)}", exc_info=True)
             logger.info(f"Total users fetched: {len(users)}")
         else:
-            # Get all users (backward compatibility)
-            logger.info("No user_ids provided, scanning all users")
-            users = users_table.scan().get("Items", [])
-            logger.info(f"Found {len(users)} total users in database")
+            # Scan for users with scheduler_enabled=True (from scheduler trigger)
+            logger.info("Scanning for users with scheduler_enabled=True")
+            from boto3.dynamodb import conditions
+            response = users_table.scan(
+                FilterExpression=conditions.Attr("scheduler_enabled").eq(True)
+            )
+            users = response.get("Items", [])
+            logger.info(f"Found {len(users)} users with scheduler enabled")
+            
+            # Filter out system config user if present
+            users = [u for u in users if u.get("user_id") != "SYSTEM_CONFIG"]
+            logger.info(f"Processing {len(users)} users (after filtering)")
 
         if not users:
             logger.info("No users found in database")
