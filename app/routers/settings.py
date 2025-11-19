@@ -55,26 +55,17 @@ def get_scheduler_settings(user_id: str = Depends(get_current_user_id)) -> Dict:
     
     # Get user's personal scheduler settings from DynamoDB
     db_settings = dynamo.get_scheduler_settings(user_id)
-    if db_settings:
-        current_schedule = {
-            "day": db_settings.get("day", 1),
-            "hour": db_settings.get("hour", 6),
-            "minute": db_settings.get("minute", 0),
-            "enabled": db_settings.get("enabled", False),
-        }
-    else:
-        # Fallback to defaults if not in DB
-        current_schedule = {
-            "day": 1,
-            "hour": 6,
-            "minute": 0,
-            "enabled": False,
-        }
+    # Schedule is fixed: 1st day at 00:00 UTC
+    current_schedule = {
+        "day": 1,
+        "hour": 0,
+        "minute": 0,
+        "enabled": db_settings.get("enabled", False) if db_settings else False,
+    }
     
-    # Get next run time from running scheduler if available (for this specific user)
+    # Get next run time from running scheduler if available (system-wide)
     if scheduler and scheduler.running:
-        job_id = f"monthly_expense_reports_{user_id}"
-        job = scheduler.get_job(job_id)
+        job = scheduler.get_job("monthly_expense_reports")
         if job and job.next_run_time:
             current_schedule["next_run"] = job.next_run_time.isoformat()
     
@@ -109,33 +100,6 @@ def start_scheduler_endpoint(user_id: str = Depends(get_current_user_id)) -> Dic
         # Ensure system-wide scheduler service is running
         if scheduler is None or not scheduler.running:
             start_scheduler()
-        else:
-            # Scheduler is already running, add or update job for this user
-            from app.utils.scheduler import monthly_reports_job_for_user
-            from apscheduler.triggers.cron import CronTrigger
-            
-            job_id = f"monthly_expense_reports_{user_id}"
-            new_trigger = CronTrigger(day=day, hour=hour, minute=minute)
-            
-            try:
-                existing_job = scheduler.get_job(job_id)
-                if existing_job:
-                    # Job exists, reschedule it
-                    scheduler.reschedule_job(job_id, trigger=new_trigger)
-                    logger.info(f"Rescheduled job for user {user_id}: day={day}, hour={hour}, minute={minute}")
-                else:
-                    # Job doesn't exist, add it
-                    scheduler.add_job(
-                        monthly_reports_job_for_user,
-                        args=[user_id],
-                        trigger=new_trigger,
-                        id=job_id,
-                        name=f"Monthly Expense Reports - {user_id}",
-                        replace_existing=True
-                    )
-                    logger.info(f"Added scheduler job for user {user_id}: day={day}, hour={hour}, minute={minute}")
-            except Exception as e:
-                logger.error(f"Failed to add/update job for user {user_id}: {str(e)}", exc_info=True)
         
         return {
             "success": True,
@@ -166,15 +130,6 @@ def stop_scheduler_endpoint(user_id: str = Depends(get_current_user_id)) -> Dict
         
         # Disable scheduler for this user only
         dynamo.save_scheduler_settings(user_id, day, hour, minute, enabled=False)
-        
-        # Remove this user's job from the scheduler
-        if scheduler and scheduler.running:
-            job_id = f"monthly_expense_reports_{user_id}"
-            try:
-                scheduler.remove_job(job_id)
-                logger.info(f"Removed scheduler job for user {user_id}")
-            except:
-                pass  # Job doesn't exist, that's fine
         
         # Note: We don't stop the system scheduler as other users might have it enabled
         
@@ -217,69 +172,24 @@ def update_scheduler_schedule(
         dynamo.save_scheduler_settings(user_id, schedule.day, schedule.hour, schedule.minute, enabled=enabled)
         logger.info(f"Saved schedule to database for user {user_id}")
         
-        # If this user has scheduler enabled and system scheduler is running, update their job
-        if enabled and scheduler and scheduler.running:
-            from app.utils.scheduler import monthly_reports_job_for_user
-            from apscheduler.triggers.cron import CronTrigger
-            
-            job_id = f"monthly_expense_reports_{user_id}"
-            new_trigger = CronTrigger(
-                day=schedule.day,
-                hour=schedule.hour,
-                minute=schedule.minute
-            )
-            
-            try:
-                existing_job = scheduler.get_job(job_id)
-                if existing_job:
-                    # Job exists, reschedule it with new trigger
-                    scheduler.reschedule_job(job_id, trigger=new_trigger)
-                    logger.info(f"Rescheduled existing job for user {user_id}: day={schedule.day}, hour={schedule.hour}, minute={schedule.minute}")
-                else:
-                    # Job doesn't exist, add it
-                    scheduler.add_job(
-                        monthly_reports_job_for_user,
-                        args=[user_id],
-                        trigger=new_trigger,
-                        id=job_id,
-                        name=f"Monthly Expense Reports - {user_id}",
-                        replace_existing=True
-                    )
-                    logger.info(f"Added new job for user {user_id}: day={schedule.day}, hour={schedule.hour}, minute={schedule.minute}")
-                
-                # Verify the job was updated
-                import time
-                time.sleep(0.2)  # Small delay to ensure job is registered
-                verify_job = scheduler.get_job(job_id)
-                if verify_job:
-                    logger.info(f"Job verified: {verify_job.id}, next_run={verify_job.next_run_time}, trigger={verify_job.trigger}")
-                else:
-                    logger.error(f"Job verification failed: job {job_id} not found after update")
-                    raise HTTPException(status_code=500, detail="Job update failed: job not found after update")
-            except HTTPException:
-                raise
-            except Exception as e:
-                logger.error(f"Failed to update job for user {user_id}: {str(e)}", exc_info=True)
-                raise HTTPException(status_code=500, detail=f"Failed to update scheduler job: {str(e)}")
+        # Schedule is fixed at 1st day 00:00 UTC - no need to update scheduler job
+        # Just save user's preference (for display purposes only)
         
-        # Get next run time if scheduler is running (for this specific user)
+        # Get next run time if scheduler is running (system-wide, always 1st day 00:00)
         next_run = None
         if scheduler and scheduler.running:
-            job_id = f"monthly_expense_reports_{user_id}"
-            job = scheduler.get_job(job_id)
+            job = scheduler.get_job("monthly_expense_reports")
             if job and job.next_run_time:
                 next_run = job.next_run_time.isoformat()
-                logger.info(f"Next run time for user {user_id}: {next_run}")
-            else:
-                logger.warning(f"No next_run time found for job {job_id}")
+                logger.info(f"Next run time: {next_run}")
         
         return {
             "success": True,
-            "message": f"Schedule updated and saved. Your reports will run on day {schedule.day} at {schedule.hour:02d}:{schedule.minute:02d} UTC.",
+            "message": "Schedule preference saved. Monthly reports run on the 1st day of each month at 00:00 UTC for all users.",
             "schedule": {
-                "day": schedule.day,
-                "hour": schedule.hour,
-                "minute": schedule.minute,
+                "day": 1,
+                "hour": 0,
+                "minute": 0,
                 "next_run": next_run
             }
         }
