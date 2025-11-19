@@ -54,42 +54,20 @@ def start_scheduler():
     # ============================================================
     # CRON SCHEDULE CONFIGURATION
     # ============================================================
-    # Update these values to change when monthly reports run:
-    # - day: Day of month (1-31). Use 1 for 1st of every month
-    # - hour: Hour in UTC (0-23). Use 0 for midnight
-    # - minute: Minute (0-59). Use 0 for start of hour
+    # Schedule: Every day at 12:00 UTC
+    # - hour: 12 (12:00 PM UTC)
+    # - minute: 0 (start of hour)
+    # - day: Not specified (runs every day)
     # ============================================================
     
-    # Production schedule: 1st day of month at 00:00 UTC
-    # day = 1
-    # hour = 0
-    # minute = 0
+    # Production schedule: Every day at 12:00 UTC
+    hour = 12
+    minute = 0
     
-    # For testing: Use IntervalTrigger to run after 10 seconds (very short for testing)
-    from datetime import datetime, timezone, timedelta
+    from datetime import datetime, timezone
     import time
     
-    now = datetime.now(timezone.utc)
-    
-    logger.info(f"TESTING MODE: Using IntervalTrigger to run in 10 seconds (one-time)")
-    logger.info(f"Current time: {now.isoformat()} UTC")
-    
-    # Create a wrapper function that runs the job once, then removes itself
-    def one_time_job():
-        try:
-            logger.info("=" * 80)
-            logger.info("ONE-TIME JOB FUNCTION CALLED!")
-            logger.info("=" * 80)
-            monthly_reports_job()
-        except Exception as e:
-            logger.error(f"Error in one_time_job: {str(e)}", exc_info=True)
-        finally:
-            # Remove the job after it runs once
-            try:
-                scheduler.remove_job("monthly_expense_reports")
-                logger.info("Test job removed after execution")
-            except Exception as e:
-                logger.warning(f"Could not remove job: {str(e)}")
+    logger.info(f"Schedule: Every day at {hour:02d}:{minute:02d} UTC")
     
     # Start scheduler FIRST
     logger.info("Starting scheduler...")
@@ -104,33 +82,24 @@ def start_scheduler():
     time.sleep(1.0)
     logger.info("Scheduler startup delay completed")
     
-    # NOW add the job AFTER scheduler is started
-    # Use IntervalTrigger for testing (will run once after 10 seconds, then remove itself)
-    # Using seconds=10 for quick testing
+    # Add the job with daily cron schedule
     logger.info("Adding job to scheduler...")
-    job = scheduler.add_job(
-        one_time_job,
-        trigger=IntervalTrigger(seconds=10),
-        id="monthly_expense_reports",
-        name="Monthly Expense Reports (TEST MODE - ONE TIME)",
-        replace_existing=True,
-        max_instances=1  # Only allow one instance to run at a time
-    )
-    
-    logger.info(f"Job added to scheduler: {job.id}")
-    
-    # For production, uncomment this and comment out the IntervalTrigger above:
-    # job = scheduler.add_job(
-    #     monthly_reports_job,
-    #     trigger=CronTrigger(
-    #         day=1,      # 1st day of month
-    #         hour=0,     # 00:00 UTC
-    #         minute=0    # Start of hour
-    #     ),
-    #     id="monthly_expense_reports",
-    #     name="Monthly Expense Reports",
-    #     replace_existing=True
-    # )
+    try:
+        job = scheduler.add_job(
+            monthly_reports_job,
+            trigger=CronTrigger(
+                hour=hour,      # 12:00 UTC
+                minute=minute   # Start of hour
+                # day not specified = runs every day
+            ),
+            id="monthly_expense_reports",
+            name="Daily Expense Reports (12:00 UTC)",
+            replace_existing=True
+        )
+        logger.info(f"Job added to scheduler successfully: {job.id}")
+    except Exception as e:
+        logger.error(f"Failed to add job to scheduler: {str(e)}", exc_info=True)
+        raise
     
     # Log detailed information
     from datetime import timezone
