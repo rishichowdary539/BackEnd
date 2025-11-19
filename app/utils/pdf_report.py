@@ -6,7 +6,8 @@ import boto3
 from botocore.exceptions import ClientError
 from app.core.config import settings
 
-
+# Initialize S3 client using default AWS credential chain
+# (environment variables, AWS credentials file, or IAM role)
 s3 = boto3.client("s3", region_name=settings.S3_REGION)
 
 
@@ -44,7 +45,14 @@ def generate_and_upload_pdf(user_id, month, expenses, total, overspending, sugge
     for spike in spikes:
         pdf.cell(0, 10, f"- {spike['category']}: ${spike['amount']} on {spike['timestamp']}", ln=True)
 
-    pdf_bytes = pdf.output(dest="S").encode("latin-1")
+    # pdf.output(dest="S") returns bytes/bytearray, no need to encode
+    pdf_output = pdf.output(dest="S")
+    if isinstance(pdf_output, str):
+        pdf_bytes = pdf_output.encode("latin-1")
+    elif isinstance(pdf_output, (bytes, bytearray)):
+        pdf_bytes = bytes(pdf_output)
+    else:
+        pdf_bytes = bytes(pdf_output)
     buffer = io.BytesIO(pdf_bytes)
 
     s3_key = f"reports/{user_id}/{report_id}.pdf"
