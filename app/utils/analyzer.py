@@ -46,12 +46,15 @@ class FinanceAnalyzer:
     @staticmethod
     def _load_budget_thresholds_from_db(user_id: Optional[str] = None) -> Optional[Dict[str, float]]:
         """Load budget thresholds from DynamoDB for a specific user."""
-        if not user_id:
+        if not user_id or not isinstance(user_id, str) or user_id.strip() == "":
             return None
         try:
             from app.db import dynamo
             return dynamo.get_budget_thresholds(user_id)
-        except Exception:
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Failed to load budget thresholds from DB for user_id '{user_id}': {str(e)}")
             return None
 
     @staticmethod

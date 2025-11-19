@@ -263,6 +263,11 @@ def get_budget_thresholds(user_id: str):
     Get budget thresholds from DynamoDB for a specific user.
     Returns dict with category thresholds, or None if not found.
     """
+    # Validate user_id before making DynamoDB call
+    if not user_id or not isinstance(user_id, str) or user_id.strip() == "":
+        print(f"[ERROR] get_budget_thresholds failed: Invalid user_id provided: {user_id}")
+        return None
+    
     try:
         response = users_table.get_item(Key={"user_id": user_id})
         item = response.get("Item")
@@ -273,7 +278,11 @@ def get_budget_thresholds(user_id: str):
                 return thresholds
         return None
     except ClientError as e:
-        print(f"[ERROR] get_budget_thresholds failed: {e.response['Error']['Message']}")
+        error_msg = e.response.get('Error', {}).get('Message', str(e))
+        print(f"[ERROR] get_budget_thresholds failed for user_id '{user_id}': {error_msg}")
+        return None
+    except Exception as e:
+        print(f"[ERROR] get_budget_thresholds failed for user_id '{user_id}': {str(e)}")
         return None
 
 

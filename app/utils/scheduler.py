@@ -7,6 +7,7 @@ import os
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 
 from app.utils.lambda_scheduler import trigger_monthly_reports
 
@@ -64,20 +65,37 @@ def start_scheduler():
     # hour = 0
     # minute = 0
     
-    # For testing: Use DateTrigger to run at a specific datetime (2 minutes from now)
+    # For testing: Use IntervalTrigger to run after 2 minutes, then remove job after first run
     from datetime import datetime, timezone, timedelta
+    import time
+    
     now = datetime.now(timezone.utc)
     future_time = now + timedelta(minutes=2)
     
-    logger.info(f"TESTING MODE: Using DateTrigger to run at {future_time.isoformat()} UTC (in 2 minutes)")
+    logger.info(f"TESTING MODE: Using IntervalTrigger to run in 2 minutes (one-time)")
+    logger.info(f"Current time: {now.isoformat()} UTC")
+    logger.info(f"Scheduled time: {future_time.isoformat()} UTC")
     
-    # Use DateTrigger for testing (runs once at specific time)
+    # Create a wrapper function that runs the job once, then removes itself
+    def one_time_job():
+        try:
+            monthly_reports_job()
+        finally:
+            # Remove the job after it runs once
+            try:
+                scheduler.remove_job("monthly_expense_reports")
+                logger.info("Test job removed after execution")
+            except:
+                pass
+    
+    # Use IntervalTrigger for testing (will run once, then remove itself)
     job = scheduler.add_job(
-        monthly_reports_job,
-        trigger=DateTrigger(run_date=future_time),
+        one_time_job,
+        trigger=IntervalTrigger(minutes=2),
         id="monthly_expense_reports",
-        name="Monthly Expense Reports (TEST MODE)",
-        replace_existing=True
+        name="Monthly Expense Reports (TEST MODE - ONE TIME)",
+        replace_existing=True,
+        max_instances=1  # Only allow one instance to run at a time
     )
     
     # For production, uncomment this and comment out the DateTrigger above:
@@ -93,7 +111,11 @@ def start_scheduler():
     #     replace_existing=True
     # )
     
+    # Start scheduler BEFORE adding job to ensure it's ready
     scheduler.start()
+    
+    # Small delay to ensure scheduler is fully started
+    time.sleep(0.5)
     
     # Log detailed information
     from datetime import timezone
@@ -102,23 +124,36 @@ def start_scheduler():
     current_time = datetime.now(timezone.utc)
     logger.info(f"Current time: {current_time.isoformat()} UTC")
     
-    if job.next_run_time:
-        logger.info(f"Next run: {job.next_run_time.isoformat()}")
-        time_until_run = (job.next_run_time - current_time).total_seconds()
-        if time_until_run > 0:
-            logger.info(f"Time until next run: {int(time_until_run / 60)} minutes ({int(time_until_run)} seconds)")
+    # Get job again to ensure it's registered
+    job = scheduler.get_job("monthly_expense_reports")
+    if job:
+        if job.next_run_time:
+            logger.info(f"Next run: {job.next_run_time.isoformat()}")
+            time_until_run = (job.next_run_time - current_time).total_seconds()
+            if time_until_run > 0:
+                logger.info(f"Time until next run: {int(time_until_run / 60)} minutes ({int(time_until_run)} seconds)")
+                logger.info(f"Job will trigger in {int(time_until_run)} seconds")
+            else:
+                logger.warning(f"Next run time is in the past! ({int(abs(time_until_run) / 60)} minutes ago)")
+                logger.warning("Job may not trigger!")
         else:
-            logger.warning(f"Next run time is in the past! ({int(abs(time_until_run) / 60)} minutes ago)")
-            logger.warning("Job may not trigger!")
+            logger.error("No next run time calculated! Job may not trigger!")
+        
+        logger.info(f"Job ID: {job.id}")
+        logger.info(f"Job name: {job.name}")
+        logger.info(f"Job trigger: {job.trigger}")
     else:
-        logger.error("No next run time calculated! Job may not trigger!")
+        logger.error("Job 'monthly_expense_reports' not found in scheduler!")
     
     # Verify scheduler is running
     if scheduler.running:
         logger.info(f"Scheduler is RUNNING: {scheduler.running}")
         logger.info(f"Number of jobs: {len(scheduler.get_jobs())}")
+        for j in scheduler.get_jobs():
+            logger.info(f"  - Job: {j.id} ({j.name}), Next run: {j.next_run_time}")
     else:
         logger.error("Scheduler is NOT running!")
+    
     logger.info("=" * 80)
 
 
