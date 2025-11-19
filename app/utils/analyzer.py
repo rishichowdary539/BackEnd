@@ -40,15 +40,17 @@ class FinanceAnalyzer:
         self._spike_sigma = spike_sigma
         self._minimum_spike_amount = minimum_spike_amount
         self._budget_config_path = budget_config_path
-        # Load thresholds from DB first, fallback to file
-        self._budget_thresholds = self._load_budget_thresholds_from_db() or self._load_budget_thresholds(budget_config_path)
+        # Load default thresholds from file (fallback only, user-specific thresholds loaded per request)
+        self._budget_thresholds = self._load_budget_thresholds(budget_config_path)
 
     @staticmethod
-    def _load_budget_thresholds_from_db() -> Optional[Dict[str, float]]:
-        """Load budget thresholds from DynamoDB."""
+    def _load_budget_thresholds_from_db(user_id: Optional[str] = None) -> Optional[Dict[str, float]]:
+        """Load budget thresholds from DynamoDB for a specific user."""
+        if not user_id:
+            return None
         try:
             from app.db import dynamo
-            return dynamo.get_budget_thresholds()
+            return dynamo.get_budget_thresholds(user_id)
         except Exception:
             return None
 
@@ -65,9 +67,9 @@ class FinanceAnalyzer:
         with budget_file.open() as fp:
             return json.load(fp)
 
-    def load_thresholds(self, overrides: Optional[Dict[str, float]] = None) -> Dict[str, float]:
+    def load_thresholds(self, user_id: Optional[str] = None, overrides: Optional[Dict[str, float]] = None) -> Dict[str, float]:
         # Always check DB first (in case thresholds were updated)
-        db_thresholds = self._load_budget_thresholds_from_db()
+        db_thresholds = self._load_budget_thresholds_from_db(user_id) if user_id else None
         if db_thresholds:
             base_thresholds = db_thresholds
         else:

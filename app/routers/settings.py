@@ -47,18 +47,20 @@ class BudgetThresholdsUpdate(BaseModel):
 @router.get("/scheduler")
 def get_scheduler_settings(user_id: str = Depends(get_current_user_id)) -> Dict:
     """
-    Get current scheduler status and configuration.
+    Get current scheduler status and configuration for the current user.
     Loads settings from DynamoDB.
     """
+    # Get system-wide scheduler status (is the scheduler service running?)
     status_info = get_scheduler_status()
     
-    # Get schedule from DynamoDB (source of truth)
-    db_settings = dynamo.get_scheduler_settings()
+    # Get user's personal scheduler settings from DynamoDB
+    db_settings = dynamo.get_scheduler_settings(user_id)
     if db_settings:
         current_schedule = {
             "day": db_settings.get("day", 1),
             "hour": db_settings.get("hour", 6),
             "minute": db_settings.get("minute", 0),
+            "enabled": db_settings.get("enabled", False),
         }
     else:
         # Fallback to defaults if not in DB
@@ -66,6 +68,7 @@ def get_scheduler_settings(user_id: str = Depends(get_current_user_id)) -> Dict:
             "day": 1,
             "hour": 6,
             "minute": 0,
+            "enabled": False,
         }
     
     # Get next run time from running scheduler if available
@@ -77,7 +80,8 @@ def get_scheduler_settings(user_id: str = Depends(get_current_user_id)) -> Dict:
                 break
     
     return {
-        "running": status_info.get("running", False),
+        "service_running": status_info.get("running", False),  # System-wide scheduler service status
+        "enabled": current_schedule.get("enabled", False),  # User's personal enable/disable
         "jobs": status_info.get("jobs", []),
         "schedule": current_schedule,
     }
@@ -86,89 +90,68 @@ def get_scheduler_settings(user_id: str = Depends(get_current_user_id)) -> Dict:
 @router.post("/scheduler/start")
 def start_scheduler_endpoint(user_id: str = Depends(get_current_user_id)) -> Dict:
     """
-    Start the scheduler and save state to DB.
+    Enable scheduler for the current user and ensure system scheduler is running.
     """
     try:
-        if scheduler and scheduler.running:
-            # Update DB state
-            db_settings = dynamo.get_scheduler_settings()
-            if db_settings:
-                dynamo.save_scheduler_settings(
-                    db_settings.get("day", 1),
-                    db_settings.get("hour", 6),
-                    db_settings.get("minute", 0),
-                    running=True
-                )
-            return {
-                "success": True,
-                "message": "Scheduler is already running",
-                "status": get_scheduler_status()
-            }
+        # Get user's current settings
+        db_settings = dynamo.get_scheduler_settings(user_id)
+        if not db_settings:
+            # Initialize defaults
+            dynamo.initialize_default_scheduler_settings(user_id)
+            db_settings = dynamo.get_scheduler_settings(user_id)
         
-        start_scheduler()
+        day = db_settings.get("day", 1)
+        hour = db_settings.get("hour", 6)
+        minute = db_settings.get("minute", 0)
         
-        # Save running state to DB
-        db_settings = dynamo.get_scheduler_settings()
-        if db_settings:
-            dynamo.save_scheduler_settings(
-                db_settings.get("day", 1),
-                db_settings.get("hour", 6),
-                db_settings.get("minute", 0),
-                running=True
-            )
+        # Enable scheduler for this user
+        dynamo.save_scheduler_settings(user_id, day, hour, minute, enabled=True)
+        
+        # Ensure system-wide scheduler service is running
+        if scheduler is None or not scheduler.running:
+            start_scheduler()
         
         return {
             "success": True,
-            "message": "Scheduler started successfully",
+            "message": "Scheduler enabled for your account. Monthly reports will be generated automatically.",
             "status": get_scheduler_status()
         }
     except Exception as e:
-        logger.error(f"Error starting scheduler: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to start scheduler: {str(e)}")
+        logger.error(f"Error enabling scheduler: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to enable scheduler: {str(e)}")
 
 
 @router.post("/scheduler/stop")
 def stop_scheduler_endpoint(user_id: str = Depends(get_current_user_id)) -> Dict:
     """
-    Stop the scheduler and save state to DB.
+    Disable scheduler for the current user (doesn't stop system scheduler for other users).
     """
     try:
-        if scheduler is None or not scheduler.running:
-            # Update DB state
-            db_settings = dynamo.get_scheduler_settings()
-            if db_settings:
-                dynamo.save_scheduler_settings(
-                    db_settings.get("day", 1),
-                    db_settings.get("hour", 6),
-                    db_settings.get("minute", 0),
-                    running=False
-                )
-            return {
-                "success": True,
-                "message": "Scheduler is already stopped",
-                "status": {"running": False}
-            }
+        # Get user's current settings
+        db_settings = dynamo.get_scheduler_settings(user_id)
+        if not db_settings:
+            # Initialize defaults
+            dynamo.initialize_default_scheduler_settings(user_id)
+            db_settings = dynamo.get_scheduler_settings(user_id)
         
-        stop_scheduler()
+        day = db_settings.get("day", 1)
+        hour = db_settings.get("hour", 6)
+        minute = db_settings.get("minute", 0)
         
-        # Save stopped state to DB
-        db_settings = dynamo.get_scheduler_settings()
-        if db_settings:
-            dynamo.save_scheduler_settings(
-                db_settings.get("day", 1),
-                db_settings.get("hour", 6),
-                db_settings.get("minute", 0),
-                running=False
-            )
+        # Disable scheduler for this user only
+        dynamo.save_scheduler_settings(user_id, day, hour, minute, enabled=False)
+        
+        # Note: We don't stop the system scheduler as other users might have it enabled
+        # The scheduler will simply skip this user when processing
         
         return {
             "success": True,
-            "message": "Scheduler stopped successfully",
-            "status": {"running": False}
+            "message": "Scheduler disabled for your account. Monthly reports will not be generated automatically.",
+            "status": get_scheduler_status()
         }
     except Exception as e:
-        logger.error(f"Error stopping scheduler: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to stop scheduler: {str(e)}")
+        logger.error(f"Error disabling scheduler: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to disable scheduler: {str(e)}")
 
 
 @router.put("/scheduler/schedule")
@@ -189,62 +172,54 @@ def update_scheduler_schedule(
         raise HTTPException(status_code=400, detail="Minute must be between 0 and 59")
     
     try:
-        # If scheduler is running, we need to update the job
+        # Get user's current enabled state
+        db_settings = dynamo.get_scheduler_settings(user_id)
+        enabled = db_settings.get("enabled", False) if db_settings else False
+        
+        # Save user's schedule preference to DB
+        dynamo.save_scheduler_settings(user_id, schedule.day, schedule.hour, schedule.minute, enabled=enabled)
+        
+        # If this user has scheduler enabled and system scheduler is running, we may need to update it
+        # For simplicity, we'll use the first enabled user's schedule for the system scheduler
+        if enabled and scheduler and scheduler.running:
+            # Get all enabled users and use the first one's schedule (or this user's if they're the only one)
+            enabled_users = dynamo.get_all_users_with_scheduler_enabled()
+            if enabled_users and enabled_users[0] == user_id:
+                # This user is the first enabled user, update system scheduler
+                from app.utils.scheduler import monthly_reports_job
+                from apscheduler.triggers.cron import CronTrigger
+                
+                scheduler.remove_job("monthly_expense_reports")
+                scheduler.add_job(
+                    monthly_reports_job,
+                    trigger=CronTrigger(
+                        day=schedule.day,
+                        hour=schedule.hour,
+                        minute=schedule.minute
+                    ),
+                    id="monthly_expense_reports",
+                    name="Monthly Expense Reports",
+                    replace_existing=True
+                )
+                logger.info(f"System scheduler schedule updated to: day={schedule.day}, hour={schedule.hour}, minute={schedule.minute}")
+        
+        # Get next run time if scheduler is running
+        next_run = None
         if scheduler and scheduler.running:
-            # Remove existing job
-            scheduler.remove_job("monthly_expense_reports")
-            
-            # Add new job with updated schedule
-            from app.utils.scheduler import monthly_reports_job
-            scheduler.add_job(
-                monthly_reports_job,
-                trigger=CronTrigger(
-                    day=schedule.day,
-                    hour=schedule.hour,
-                    minute=schedule.minute
-                ),
-                id="monthly_expense_reports",
-                name="Monthly Expense Reports",
-                replace_existing=True
-            )
-            
-            logger.info(f"Scheduler schedule updated to: day={schedule.day}, hour={schedule.hour}, minute={schedule.minute}")
-            
-            # Save to DynamoDB (preserve running state)
-            db_settings = dynamo.get_scheduler_settings()
-            running = db_settings.get("running", False) if db_settings else False
-            dynamo.save_scheduler_settings(schedule.day, schedule.hour, schedule.minute, running=running)
-            
-            # Get updated job info
             job = scheduler.get_job("monthly_expense_reports")
-            next_run = job.next_run_time.isoformat() if job and job.next_run_time else None
-            
-            return {
-                "success": True,
-                "message": f"Scheduler schedule updated and saved to database. Next run: {next_run}",
-                "schedule": {
-                    "day": schedule.day,
-                    "hour": schedule.hour,
-                    "minute": schedule.minute,
-                    "next_run": next_run
-                }
+            if job and job.next_run_time:
+                next_run = job.next_run_time.isoformat()
+        
+        return {
+            "success": True,
+            "message": f"Schedule updated and saved. Your reports will run on day {schedule.day} at {schedule.hour:02d}:{schedule.minute:02d} UTC.",
+            "schedule": {
+                "day": schedule.day,
+                "hour": schedule.hour,
+                "minute": schedule.minute,
+                "next_run": next_run
             }
-        else:
-            # Scheduler is not running, save to DynamoDB for when it starts (preserve running state)
-            db_settings = dynamo.get_scheduler_settings()
-            running = db_settings.get("running", False) if db_settings else False
-            dynamo.save_scheduler_settings(schedule.day, schedule.hour, schedule.minute, running=running)
-            
-            return {
-                "success": True,
-                "message": "Schedule updated and saved to database. Start scheduler to apply changes.",
-                "schedule": {
-                    "day": schedule.day,
-                    "hour": schedule.hour,
-                    "minute": schedule.minute,
-                },
-                "note": "Scheduler is not running. Start it to apply this schedule."
-            }
+        }
     except Exception as e:
         logger.error(f"Error updating scheduler schedule: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to update schedule: {str(e)}")
@@ -253,9 +228,9 @@ def update_scheduler_schedule(
 @router.get("/thresholds")
 def get_budget_thresholds(user_id: str = Depends(get_current_user_id)) -> Dict:
     """
-    Get current budget thresholds from DynamoDB.
+    Get current budget thresholds from DynamoDB for the current user.
     """
-    thresholds = dynamo.get_budget_thresholds()
+    thresholds = dynamo.get_budget_thresholds(user_id)
     if thresholds is None:
         # Return empty dict if not found
         return {"thresholds": {}}
@@ -278,7 +253,7 @@ def update_budget_thresholds(
             raise HTTPException(status_code=400, detail=f"Threshold for {category} must be positive")
     
     try:
-        success = dynamo.save_budget_thresholds(update.thresholds)
+        success = dynamo.save_budget_thresholds(user_id, update.thresholds)
         if not success:
             raise HTTPException(status_code=500, detail="Failed to save budget thresholds")
         

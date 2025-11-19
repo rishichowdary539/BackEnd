@@ -45,9 +45,12 @@ def generate_monthly_report(month: str, user_id: str = Depends(get_current_user_
         if not expenses:
             raise HTTPException(status_code=404, detail="No expenses found for this month.")
 
+        # Load user's thresholds for analysis
+        thresholds = finance_analyzer.load_thresholds(user_id=user_id)
+        
         # Analyze expenses via the reusable finance_analyzer_lib
         try:
-            summary = finance_analyzer.summarize(expenses)
+            summary = finance_analyzer.summarize(expenses, budget_overrides=thresholds)
             logger.info(f"Summary generated successfully: total={summary.get('monthly_total', 0)}")
         except Exception as e:
             logger.error(f"Error analyzing expenses: {str(e)}")

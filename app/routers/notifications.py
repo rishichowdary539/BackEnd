@@ -27,15 +27,15 @@ def get_current_user_id(authorization: Optional[str] = Header(None)) -> str:
     return user_id
 
 
-def generate_notifications(expenses: List[Dict], summary: Dict, month: str) -> List[Dict]:
+def generate_notifications(expenses: List[Dict], summary: Dict, month: str, user_id: str) -> List[Dict]:
     """
     Generate user-friendly notifications based on spending patterns and thresholds.
     Returns list of notification objects with type, message, and severity.
-    Uses thresholds from DynamoDB (loaded via finance_analyzer).
+    Uses thresholds from DynamoDB for the specific user (loaded via finance_analyzer).
     """
     notifications = []
-    # Load thresholds from DB (analyzer loads from DB first, then falls back to file)
-    thresholds = finance_analyzer.load_thresholds()
+    # Load thresholds from DB for this user (analyzer loads from DB first, then falls back to file)
+    thresholds = finance_analyzer.load_thresholds(user_id=user_id)
     
     if not expenses:
         return notifications
@@ -154,9 +154,11 @@ def get_notifications(month: str, user_id: str = Depends(get_current_user_id)) -
     month must follow YYYY-MM format. Example: 2025-11
     """
     expenses = dynamo.get_expenses_for_user(user_id, month)
-    summary = finance_analyzer.summarize(expenses)
+    # Load user's thresholds for analysis
+    thresholds = finance_analyzer.load_thresholds(user_id=user_id)
+    summary = finance_analyzer.summarize(expenses, budget_overrides=thresholds)
     
-    notifications = generate_notifications(expenses, summary, month)
+    notifications = generate_notifications(expenses, summary, month, user_id)
     
     # Count by severity
     severity_counts = {

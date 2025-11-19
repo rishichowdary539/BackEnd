@@ -38,9 +38,11 @@ def register(user: UserCreate):
     if not success:
         raise HTTPException(status_code=500, detail="Error saving user")
 
-    # Initialize default scheduler settings and budget thresholds if this is the first user
-    dynamo.initialize_default_scheduler_settings()
-    dynamo.initialize_default_budget_thresholds()
+    # Initialize default budget thresholds for this new user
+    dynamo.initialize_default_budget_thresholds(user_db.user_id)
+    
+    # Initialize default scheduler settings for this new user
+    dynamo.initialize_default_scheduler_settings(user_db.user_id)
 
     return UserPublic(**user_db.dict())
 

@@ -162,25 +162,25 @@ def _from_dynamo(obj: Any):
     return obj
 
 
-# Scheduler Settings Storage (using SYSTEM_CONFIG user_id)
-SYSTEM_CONFIG_USER_ID = "SYSTEM_CONFIG"
+# Scheduler Settings Storage (per-user)
+SYSTEM_CONFIG_USER_ID = "SYSTEM_CONFIG"  # Still used for system-wide config if needed
 
 
-def get_scheduler_settings():
+def get_scheduler_settings(user_id: str):
     """
-    Get scheduler settings from DynamoDB (stored in a special system user record).
-    Returns dict with day, hour, minute, running, or None if not found.
+    Get scheduler settings from DynamoDB for a specific user.
+    Returns dict with day, hour, minute, enabled, or None if not found.
     """
     try:
-        response = users_table.get_item(Key={"user_id": SYSTEM_CONFIG_USER_ID})
+        response = users_table.get_item(Key={"user_id": user_id})
         item = response.get("Item")
         if item:
-            settings = _from_dynamo(item)
+            user_data = _from_dynamo(item)
             return {
-                "day": settings.get("scheduler_day", 1),
-                "hour": settings.get("scheduler_hour", 6),
-                "minute": settings.get("scheduler_minute", 0),
-                "running": settings.get("scheduler_running", False),
+                "day": user_data.get("scheduler_day", 1),
+                "hour": user_data.get("scheduler_hour", 6),
+                "minute": user_data.get("scheduler_minute", 0),
+                "enabled": user_data.get("scheduler_enabled", False),
             }
         return None
     except ClientError as e:
@@ -188,65 +188,87 @@ def get_scheduler_settings():
         return None
 
 
-def save_scheduler_settings(day: int, hour: int, minute: int, running: Optional[bool] = None):
+def save_scheduler_settings(user_id: str, day: int, hour: int, minute: int, enabled: Optional[bool] = None):
     """
-    Save scheduler settings to DynamoDB (stored in a special system user record).
-    Preserves budget thresholds when updating scheduler settings.
+    Save scheduler settings to DynamoDB for a specific user.
     """
     try:
-        # Get existing settings to preserve running state if not provided
-        existing = get_scheduler_settings()
-        if existing is None:
-            existing = {}
+        # Get existing user data to preserve other fields
+        existing_user = get_user_by_id(user_id)
         
-        # Get existing thresholds to preserve them
-        existing_thresholds = get_budget_thresholds()
-        
-        item = {
-            "user_id": SYSTEM_CONFIG_USER_ID,
-            "email": "system@config.local",  # Dummy email for system record
-            "scheduler_day": day,
-            "scheduler_hour": hour,
-            "scheduler_minute": minute,
-            "scheduler_running": running if running is not None else existing.get("running", False),
-            "updated_at": datetime.utcnow().isoformat(),
-        }
-        
-        # Preserve budget thresholds if they exist
-        if existing_thresholds:
-            item["budget_thresholds"] = existing_thresholds
+        if existing_user:
+            # Update existing user record
+            item = dict(existing_user)
+            item["scheduler_day"] = day
+            item["scheduler_hour"] = hour
+            item["scheduler_minute"] = minute
+            if enabled is not None:
+                item["scheduler_enabled"] = enabled
+            elif "scheduler_enabled" not in item:
+                item["scheduler_enabled"] = False
+            item["updated_at"] = datetime.utcnow().isoformat()
+        else:
+            # User doesn't exist, this shouldn't happen but handle gracefully
+            raise ValueError(f"User {user_id} not found")
         
         users_table.put_item(Item=_convert_for_dynamo(item))
         return True
     except ClientError as e:
         print(f"[ERROR] save_scheduler_settings failed: {e.response['Error']['Message']}")
         return False
+    except Exception as e:
+        print(f"[ERROR] save_scheduler_settings failed: {str(e)}")
+        return False
 
 
-def initialize_default_scheduler_settings():
+def initialize_default_scheduler_settings(user_id: str):
     """
-    Initialize default scheduler settings in DynamoDB if they don't exist.
-    Default: 1st day of month, 6 AM UTC (any time can be set later).
+    Initialize default scheduler settings in DynamoDB for a specific user if they don't exist.
+    Default: 1st day of month, 6 AM UTC, disabled.
     """
-    existing = get_scheduler_settings()
+    existing = get_scheduler_settings(user_id)
     if existing is None:
         # No settings exist, create default
-        save_scheduler_settings(day=1, hour=6, minute=0, running=False)
+        save_scheduler_settings(user_id, day=1, hour=6, minute=0, enabled=False)
         return True
     return False
 
 
-def get_budget_thresholds():
+def get_all_users_with_scheduler_enabled():
     """
-    Get budget thresholds from DynamoDB (stored in a special system user record).
+    Get all user IDs that have scheduler enabled.
+    Used by the scheduler to determine which users to process.
+    """
+    try:
+        # Scan users table for users with scheduler_enabled = True
+        # Note: This is a scan operation, which can be expensive for large tables
+        # In production, consider adding a GSI on scheduler_enabled
+        from boto3.dynamodb import conditions
+        response = users_table.scan(
+            FilterExpression=conditions.Attr("scheduler_enabled").eq(True)
+        )
+        user_ids = []
+        for item in response.get("Items", []):
+            user_id = item.get("user_id")
+            if user_id and user_id != SYSTEM_CONFIG_USER_ID:
+                user_ids.append(user_id)
+        return user_ids
+    except ClientError as e:
+        print(f"[ERROR] get_all_users_with_scheduler_enabled failed: {e.response['Error']['Message']}")
+        return []
+
+
+def get_budget_thresholds(user_id: str):
+    """
+    Get budget thresholds from DynamoDB for a specific user.
     Returns dict with category thresholds, or None if not found.
     """
     try:
-        response = users_table.get_item(Key={"user_id": SYSTEM_CONFIG_USER_ID})
+        response = users_table.get_item(Key={"user_id": user_id})
         item = response.get("Item")
         if item:
-            settings = _from_dynamo(item)
-            thresholds = settings.get("budget_thresholds")
+            user_data = _from_dynamo(item)
+            thresholds = user_data.get("budget_thresholds")
             if thresholds:
                 return thresholds
         return None
@@ -255,43 +277,40 @@ def get_budget_thresholds():
         return None
 
 
-def save_budget_thresholds(thresholds: dict):
+def save_budget_thresholds(user_id: str, thresholds: dict):
     """
-    Save budget thresholds to DynamoDB (stored in a special system user record).
+    Save budget thresholds to DynamoDB for a specific user.
     thresholds: dict with category names as keys and amounts as values.
     """
     try:
-        # Get existing settings to preserve scheduler settings
-        existing_settings = get_scheduler_settings()
-        existing_thresholds = get_budget_thresholds()
+        # Get existing user data to preserve other fields
+        existing_user = get_user_by_id(user_id)
         
-        item = {
-            "user_id": SYSTEM_CONFIG_USER_ID,
-            "email": "system@config.local",
-            "budget_thresholds": thresholds,
-            "updated_at": datetime.utcnow().isoformat(),
-        }
-        
-        # Preserve scheduler settings if they exist
-        if existing_settings:
-            item["scheduler_day"] = existing_settings.get("day", 1)
-            item["scheduler_hour"] = existing_settings.get("hour", 6)
-            item["scheduler_minute"] = existing_settings.get("minute", 0)
-            item["scheduler_running"] = existing_settings.get("running", False)
+        if existing_user:
+            # Update existing user record
+            item = dict(existing_user)
+            item["budget_thresholds"] = thresholds
+            item["updated_at"] = datetime.utcnow().isoformat()
+        else:
+            # User doesn't exist, this shouldn't happen but handle gracefully
+            raise ValueError(f"User {user_id} not found")
         
         users_table.put_item(Item=_convert_for_dynamo(item))
         return True
     except ClientError as e:
         print(f"[ERROR] save_budget_thresholds failed: {e.response['Error']['Message']}")
         return False
+    except Exception as e:
+        print(f"[ERROR] save_budget_thresholds failed: {str(e)}")
+        return False
 
 
-def initialize_default_budget_thresholds():
+def initialize_default_budget_thresholds(user_id: str):
     """
-    Initialize default budget thresholds in DynamoDB if they don't exist.
+    Initialize default budget thresholds in DynamoDB for a specific user if they don't exist.
     Loads from config/budget_thresholds.json file.
     """
-    existing = get_budget_thresholds()
+    existing = get_budget_thresholds(user_id)
     if existing is None:
         # Load from JSON file
         import json
@@ -302,7 +321,7 @@ def initialize_default_budget_thresholds():
         if budget_file.exists():
             with budget_file.open() as fp:
                 thresholds = json.load(fp)
-                save_budget_thresholds(thresholds)
+                save_budget_thresholds(user_id, thresholds)
                 return True
         else:
             # Use default thresholds if file doesn't exist
@@ -317,6 +336,6 @@ def initialize_default_budget_thresholds():
                 "Education": 200,
                 "Misc": 100
             }
-            save_budget_thresholds(default_thresholds)
+            save_budget_thresholds(user_id, default_thresholds)
             return True
     return False

@@ -38,17 +38,24 @@ def start_scheduler():
     
     scheduler = BackgroundScheduler()
     
-    # Get cron schedule from DynamoDB (fallback to env var, then default)
+    # Get cron schedule from first enabled user, or use defaults
     from app.db import dynamo
     
-    db_settings = dynamo.get_scheduler_settings()
-    if db_settings:
-        # Use settings from DynamoDB
-        day = db_settings.get("day", 1)
-        hour = db_settings.get("hour", 6)
-        minute = db_settings.get("minute", 0)
-        logger.info(f"Loaded scheduler settings from DynamoDB: day={day}, hour={hour}, minute={minute}")
+    # Get all enabled users and use the first one's schedule
+    enabled_users = dynamo.get_all_users_with_scheduler_enabled()
+    if enabled_users:
+        # Use first enabled user's schedule
+        db_settings = dynamo.get_scheduler_settings(enabled_users[0])
+        if db_settings:
+            day = db_settings.get("day", 1)
+            hour = db_settings.get("hour", 6)
+            minute = db_settings.get("minute", 0)
+            logger.info(f"Loaded scheduler settings from first enabled user ({enabled_users[0]}): day={day}, hour={hour}, minute={minute}")
+        else:
+            # Fallback to defaults
+            day, hour, minute = 1, 6, 0
     else:
+        # No users have scheduler enabled, use defaults
         # Fallback to environment variable
         cron_schedule = os.getenv("MONTHLY_REPORTS_CRON", "1 6 0")  # day=1, hour=6, minute=0
         
@@ -63,10 +70,7 @@ def start_scheduler():
             day = 1
             hour = 6
             minute = 0
-        
-        # Save default settings to DynamoDB for future use (not running by default)
-        dynamo.save_scheduler_settings(day, hour, minute, running=False)
-        logger.info(f"Using environment/default settings and saving to DynamoDB: day={day}, hour={hour}, minute={minute}")
+        logger.info(f"Using environment/default settings: day={day}, hour={hour}, minute={minute}")
     
     # Add monthly job
     scheduler.add_job(
@@ -82,7 +86,7 @@ def start_scheduler():
     )
     
     scheduler.start()
-    logger.info(f"Scheduler started. Monthly reports will run on day {day} at {hour:02d}:{minute:02d} UTC")
+    logger.info(f"Scheduler started. Monthly reports will run on day {day} at {hour:02d}:{minute:02d} UTC for enabled users.")
 
 
 def stop_scheduler():
