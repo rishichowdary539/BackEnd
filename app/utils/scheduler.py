@@ -54,20 +54,21 @@ def start_scheduler():
     # ============================================================
     # CRON SCHEDULE CONFIGURATION
     # ============================================================
-    # Schedule: Every day at 12:00 UTC
-    # - hour: 12 (12:00 PM UTC)
+    # Schedule: First day of each month at 00:00 UTC
+    # - day: 1 (first day of month)
+    # - hour: 0 (midnight UTC)
     # - minute: 0 (start of hour)
-    # - day: Not specified (runs every day)
     # ============================================================
     
-    # Production schedule: Every day at 12:00 UTC
-    hour = 12
+    # Production schedule: First day of each month at 00:00 UTC
+    day = 1
+    hour = 0
     minute = 0
     
     from datetime import datetime, timezone
     import time
     
-    logger.info(f"Schedule: Every day at {hour:02d}:{minute:02d} UTC")
+    logger.info(f"Schedule: First day of each month at {hour:02d}:{minute:02d} UTC")
     
     # Start scheduler FIRST
     logger.info("Starting scheduler...")
@@ -82,18 +83,18 @@ def start_scheduler():
     time.sleep(1.0)
     logger.info("Scheduler startup delay completed")
     
-    # Add the job with daily cron schedule
+    # Add the job with monthly cron schedule (1st day of month)
     logger.info("Adding job to scheduler...")
     try:
         job = scheduler.add_job(
             monthly_reports_job,
             trigger=CronTrigger(
-                hour=hour,      # 12:00 UTC
+                day=day,        # 1st day of month
+                hour=hour,      # 00:00 UTC (midnight)
                 minute=minute   # Start of hour
-                # day not specified = runs every day
             ),
             id="monthly_expense_reports",
-            name="Daily Expense Reports (12:00 UTC)",
+            name="Monthly Expense Reports (1st day at 00:00 UTC)",
             replace_existing=True
         )
         logger.info(f"Job added to scheduler successfully: {job.id}")
